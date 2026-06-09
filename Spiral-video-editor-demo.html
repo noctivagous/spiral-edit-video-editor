@@ -1,0 +1,1190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Spiral Cut — Rectangular Spiral Timeline Editor</title>
+<style>
+  :root{
+    --bg:#05060a;
+    --bg-2:#0a0e18;
+    --bg-3:#111827;
+    --panel:#0c1220cc;
+    --border:#1e293b;
+    --text:#e2e8f0;
+    --text-dim:#94a3b8;
+    --accent:#00f5ff;
+    --accent-2:#ff3bff;
+    --good:#22c55e;
+    --warn:#f59e0b;
+    --danger:#ef4444;
+    --radius:16px;
+    --shadow:0 10px 40px rgba(0,0,0,.5);
+    --glow:0 0 20px rgba(0,245,255,.45),0 0 40px rgba(255,59,255,.25);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+    background: radial-gradient(1200px 800px at 80% -10%, rgba(0,245,255,.08), transparent 60%),
+                radial-gradient(1000px 600px at -10% 110%, rgba(255,59,255,.07), transparent 60%),
+                var(--bg);
+    color:var(--text);
+    overflow:hidden;
+  }
+  .app{
+    display:grid;
+    grid-template-rows:auto 1fr;
+    height:100%;
+  }
+  header{
+    display:flex;
+    align-items:center;
+    gap:16px;
+    padding:12px 20px;
+    background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,0));
+    border-bottom:1px solid var(--border);
+    backdrop-filter:blur(10px);
+    position:sticky;
+    top:0;
+    z-index:10;
+  }
+  .header-center{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    flex:1;
+    justify-content:center;
+  }
+  .mode-toggle{
+    display:flex;
+    background:var(--bg-2);
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:2px;
+  }
+  .mode-btn{
+    padding:6px 14px;
+    font-size:12px;
+    font-weight:600;
+    border:none;
+    background:transparent;
+    color:var(--text-dim);
+    border-radius:6px;
+    cursor:pointer;
+    transition:.15s;
+  }
+  .mode-btn:hover{color:var(--text)}
+  .mode-btn.active{
+    background:var(--bg-3);
+    color:var(--accent);
+    box-shadow:0 0 0 1px rgba(0,245,255,.3);
+  }
+  .zoom-line-indicator{
+    display:none;
+    align-items:center;
+    gap:6px;
+    padding:4px 10px;
+    font-size:11px;
+    font-weight:700;
+    color:var(--accent-2);
+    background:rgba(255,59,255,.1);
+    border:1px solid rgba(255,59,255,.3);
+    border-radius:6px;
+    letter-spacing:.05em;
+  }
+  .zoom-line-indicator.active{display:flex}
+  .zoom-line-indicator::before{
+    content:'';
+    width:8px;height:8px;border-radius:50%;
+    background:var(--accent-2);
+    box-shadow:0 0 8px var(--accent-2);
+  }
+  .logo{
+    display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.5px
+  }
+  .logo-badge{
+    width:32px;height:32px;border-radius:10px;
+    background:conic-gradient(from 210deg,var(--accent),var(--accent-2),var(--accent));
+    box-shadow:var(--glow);
+    position:relative;
+  }
+  .logo-badge::after{
+    content:'';position:absolute;inset:2px;border-radius:8px;background:var(--bg-2);
+  }
+  .logo-badge::before{
+    content:'';position:absolute;inset:8px;border-radius:4px;background:linear-gradient(135deg,var(--accent),var(--accent-2));
+    z-index:1;filter:blur(.5px);
+  }
+  .spacer{flex:1}
+  .pill{
+    padding:6px 12px;border:1px solid var(--border);border-radius:999px;
+    background:var(--bg-3);color:var(--text-dim);font-size:12px;
+  }
+  main{
+    display:grid;
+    grid-template-columns:300px 1fr 320px;
+    gap:16px;
+    padding:16px;
+    height:calc(100vh - 61px);
+  }
+  .panel{
+    background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.01));
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow);
+    display:flex;
+    flex-direction:column;
+    min-height:0;
+    backdrop-filter:blur(12px);
+  }
+  .panel h2{
+    margin:0;
+    padding:14px 16px;
+    font-size:13px;
+    text-transform:uppercase;
+    letter-spacing:.12em;
+    color:var(--text-dim);
+    border-bottom:1px solid var(--border);
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .panel-body{
+    padding:12px;
+    overflow:auto;
+    flex:1;
+    min-height:0;
+  }
+  /* Left library */
+  .clip-list{
+    display:grid;
+    gap:10px;
+  }
+  .clip{
+    display:grid;
+    grid-template-columns:96px 1fr;
+    gap:10px;
+    padding:10px;
+    border-radius:12px;
+    background:var(--bg-2);
+    border:1px solid var(--border);
+    cursor:grab;
+    transition:.2s;
+  }
+  .clip:hover{
+    transform:translateY(-2px);
+    border-color:var(--accent);
+    box-shadow:0 0 0 1px rgba(0,245,255,.3), var(--glow);
+  }
+  .clip:active{cursor:grabbing}
+  .clip-thumb{
+    width:96px;height:54px;border-radius:8px;overflow:hidden;position:relative;
+    background:#000;
+  }
+  .clip-thumb canvas{width:100%;height:100%;display:block}
+  .clip-meta{
+    display:flex;flex-direction:column;justify-content:center;gap:4px;
+  }
+  .clip-name{font-weight:600;font-size:14px}
+  .clip-sub{font-size:12px;color:var(--text-dim)}
+  .clip-actions{display:flex;gap:6px;margin-top:4px}
+  .btn-small{
+    font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);
+    background:var(--bg-3);color:var(--text-dim);cursor:pointer;
+  }
+  .btn-small:hover{border-color:var(--accent);color:var(--text)}
+  /* Center */
+  .center{
+    display:grid;
+    grid-template-rows:1fr auto;
+    gap:12px;
+    min-width:0;
+  }
+  .timeline-wrap{
+    position:relative;
+    border-radius:var(--radius);
+    overflow:hidden;
+    border:1px solid var(--border);
+    background:
+      linear-gradient(var(--bg-2),var(--bg-2)) padding-box,
+      radial-gradient(800px 400px at 50% 0%, rgba(0,245,255,.08), transparent 70%) border-box;
+    box-shadow:var(--shadow);
+  }
+  #timeline{
+    width:100%;height:100%;display:block;
+    background:
+      repeating-linear-gradient(0deg, rgba(255,255,255,.03) 0 1px, transparent 1px 40px),
+      repeating-linear-gradient(90deg, rgba(255,255,255,.03) 0 1px, transparent 1px 40px),
+      var(--bg);
+    cursor:grab;
+  }
+  #timeline.grabbing{cursor:grabbing}
+  .hud{
+    position:absolute;
+    top:12px;left:12px;
+    display:flex;gap:8px;z-index:5;
+  }
+  .hud .chip{
+    padding:6px 10px;font-size:12px;border-radius:999px;
+    background:rgba(12,18,32,.8);border:1px solid var(--border);backdrop-filter:blur(6px);
+  }
+  /* Controls */
+  .controls{
+    display:flex;align-items:center;gap:12px;
+    padding:12px;
+    background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02));
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow);
+  }
+  .controls-group{
+    display:flex;align-items:center;gap:8px;padding:6px 10px;
+    background:var(--bg-2);border:1px solid var(--border);border-radius:12px;
+  }
+  .icon-btn{
+    width:36px;height:36px;display:grid;place-items:center;
+    border-radius:10px;border:1px solid var(--border);
+    background:var(--bg-3);color:var(--text);cursor:pointer;
+    transition:.2s;
+  }
+  .icon-btn:hover{border-color:var(--accent);box-shadow:0 0 0 1px rgba(0,245,255,.3)}
+  .icon-btn.primary{
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));
+    color:#001015;border:none;font-weight:700;
+    box-shadow:var(--glow);
+  }
+  .slider{
+    width:140px;
+  }
+  input[type=range]{
+    -webkit-appearance:none;width:100%;height:24px;background:transparent;
+  }
+  input[type=range]::-webkit-slider-runnable-track{
+    height:4px;background:#1f2a3d;border-radius:999px;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;margin-top:-7px;width:18px;height:18px;border-radius:50%;
+    background:var(--accent);box-shadow:0 0 12px rgba(0,245,255,.7);border:2px solid #002a30;
+  }
+  select{
+    background:var(--bg-3);color:var(--text);border:1px solid var(--border);
+    border-radius:8px;padding:6px 8px;font-size:13px;
+  }
+  /* Right Preview */
+  .preview-wrap{
+    aspect-ratio:16/9;
+    background:#000;
+    border-radius:12px;
+    overflow:hidden;
+    border:1px solid var(--border);
+    position:relative;
+    box-shadow:inset 0 0 40px rgba(0,0,0,.7);
+  }
+  #preview{
+    width:100%;height:100%;display:block;
+  }
+  .preview-overlay{
+    position:absolute;inset:0;
+    background:linear-gradient(180deg,transparent 60%,rgba(0,0,0,.6));
+    pointer-events:none;
+  }
+  .meta-grid{
+    display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;
+  }
+  .meta-card{
+    padding:10px;border-radius:10px;background:var(--bg-2);border:1px solid var(--border);
+  }
+  .meta-label{font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.08em}
+  .meta-value{font-size:18px;font-weight:700;margin-top:4px}
+  .legend{
+    margin-top:12px;padding:10px;border-radius:10px;background:var(--bg-2);border:1px dashed var(--border);
+    font-size:12px;color:var(--text-dim);line-height:1.5;
+  }
+  /* Scrollbars */
+  .panel-body::-webkit-scrollbar{width:10px}
+  .panel-body::-webkit-scrollbar-thumb{background:#1f2a3d;border-radius:999px;border:2px solid transparent;background-clip:padding-box}
+  /* Responsive */
+  @media (max-width:1200px){
+    main{grid-template-columns:260px 1fr 280px}
+  }
+  @media (max-width:1024px){
+    main{grid-template-columns:1fr;grid-template-rows:auto 1fr auto}
+    .panel.left,.panel.right{order:2}
+    .center{order:1;min-height:60vh}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo">
+      <div class="logo-badge"></div>
+      <div>SPIRAL CUT</div>
+    </div>
+    <div class="header-center">
+      <div class="mode-toggle">
+        <button class="mode-btn active" data-mode="frames" title="Frame Mode">FRAMES</button>
+        <button class="mode-btn" data-mode="clips" title="Clip Mode">CLIPS</button>
+      </div>
+      <div class="zoom-line-indicator" id="zoomLineIndicator">
+        <span>ZOOM LINE ACTIVE</span>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <div class="pill">60 FPS • GPU Accelerated Canvas</div>
+  </header>
+  <main>
+    <!-- Left: Clip Library -->
+    <aside class="panel left">
+      <h2>▸ Clip Library</h2>
+      <div class="panel-body">
+        <div class="clip-list" id="clipList"></div>
+      </div>
+    </aside>
+
+    <!-- Center: Timeline -->
+    <section class="center">
+      <div class="timeline-wrap">
+        <canvas id="timeline"></canvas>
+        <div class="hud">
+          <div class="chip" id="hudFps">0 FPS</div>
+          <div class="chip" id="hudFrames">0 frames</div>
+          <div class="chip" id="hudZoom">100%</div>
+        </div>
+      </div>
+      <div class="controls">
+        <div class="controls-group">
+          <button class="icon-btn primary" id="playBtn" title="Play/Pause">▶</button>
+          <button class="icon-btn" id="stopBtn" title="Stop">■</button>
+        </div>
+        <div class="controls-group">
+          <label style="font-size:12px;color:var(--text-dim)">Speed</label>
+          <select id="speedSel">
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="1.5">1.5×</option>
+            <option value="2">2×</option>
+          </select>
+        </div>
+        <div class="controls-group">
+          <label style="font-size:12px;color:var(--text-dim)">Zoom</label>
+          <input class="slider" type="range" id="zoomSlider" min="0.3" max="2.5" step="0.01" value="1">
+        </div>
+        <div class="controls-group">
+          <button class="icon-btn" id="zoomInBtn" title="Zoom In">+</button>
+          <button class="icon-btn" id="zoomOutBtn" title="Zoom Out">−</button>
+          <button class="icon-btn" id="resetBtn" title="Reset View">◎</button>
+        </div>
+        <div class="controls-group" style="flex:1;max-width:300px">
+          <input type="range" id="scrubSlider" min="0" max="100" value="0" style="width:100%;cursor:pointer" title="Scrub timeline">
+        </div>
+        <div class="controls-group">
+          <span id="timecode" style="font-variant-numeric:tabular-nums;font-weight:600">00:00 / 00:00</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right: Preview -->
+    <aside class="panel right">
+      <h2>◉ Preview • Playhead</h2>
+      <div class="panel-body">
+        <div class="preview-wrap">
+          <canvas id="preview"></canvas>
+          <div class="preview-overlay"></div>
+        </div>
+        <div class="meta-grid">
+          <div class="meta-card">
+            <div class="meta-label">Current Clip</div>
+            <div class="meta-value" id="metaClip">—</div>
+          </div>
+          <div class="meta-card">
+            <div class="meta-label">Frame</div>
+            <div class="meta-value" id="metaFrame">0</div>
+          </div>
+        <div class="legend">
+          <strong>How it works:</strong><br>
+          Timeline is a rectangular spiral. Clips flow inward toward the center playhead.<br>
+          Drag to pan • Wheel / pinch to zoom • Drop clips from left to add.
+        </div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<script>
+(() => {
+  // ---------- CONFIG ----------
+  const TRACK_SPACING = 90;
+  const FRAME_W = 64;
+  const FRAME_H = 40;
+  const FRAME_GAP = 14;
+  const FRAME_STEP = FRAME_W + FRAME_GAP;
+  const FPS = 30;
+
+  // ---------- TIMELINE MODE ----------
+  let timelineMode = 'frames'; // 'frames' | 'clips'
+  const BASE_PPS = 78; // base pixels per second at 1x zoom (same as FRAME_STEP)
+  const getPixelsPerSecond = () => BASE_PPS * view.scale;
+
+  // ---------- CANVAS SETUP ----------
+  const timelineCanvas = document.getElementById('timeline');
+  const tctx = timelineCanvas.getContext('2d');
+  const previewCanvas = document.getElementById('preview');
+  const pctx = previewCanvas.getContext('2d');
+
+  function resizeCanvases(){
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const rect = timelineCanvas.getBoundingClientRect();
+    timelineCanvas.width = Math.max(100, rect.width * dpr);   // prevent 0-size
+    timelineCanvas.height = Math.max(100, rect.height * dpr);
+    tctx.setTransform(dpr,0,0,dpr,0,0);
+
+    const prect = previewCanvas.getBoundingClientRect();
+    previewCanvas.width = prect.width * dpr;
+    previewCanvas.height = prect.height * dpr;
+    pctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  new ResizeObserver(resizeCanvases).observe(timelineCanvas.parentElement);
+  new ResizeObserver(resizeCanvases).observe(previewCanvas.parentElement);
+  resizeCanvases();
+
+  // Force initial layout settle
+  setTimeout(() => {
+    resizeCanvases();
+  }, 50);
+
+  // ---------- SPIRAL GENERATION ----------
+  const dirs = [[1,0],[0,-1],[-1,0],[0,1]]; // R,U,L,D
+  function buildSpiral(maxDist){
+    const segs = [];
+    let x=0, y=0, dir=0, segLen = TRACK_SPACING;
+    let total = 0;
+    segs.push({x1:0,y1:0,x2:0,y2:0,len:0,cum:0});
+    let i=0;
+    while(total < maxDist + 5000){
+      const dx = dirs[dir][0]*segLen;
+      const dy = dirs[dir][1]*segLen;
+      const x2 = x + dx;
+      const y2 = y + dy;
+      total += segLen;
+      segs.push({x1:x,y1:y,x2:x2,y2:y2,len:segLen,cum:total});
+      x=x2; y=y2;
+      dir = (dir+1)%4;
+      if(i%2===1) segLen += TRACK_SPACING;
+      i++;
+      if(i>800) break;
+    }
+    return segs;
+  }
+
+  let spiral = buildSpiral(200000);
+  const totalSpiralLen = spiral[spiral.length-1].cum;
+
+  function pointAtDistance(d){
+    if(d<=0) return {x:0,y:0,ang:0};
+    // binary search
+    let lo=0, hi=spiral.length-1;
+    while(lo<hi){
+      const mid = (lo+hi>>1);
+      if(spiral[mid].cum < d) lo = mid+1; else hi=mid;
+    }
+    const seg = spiral[lo];
+    const prevCum = spiral[lo-1]?.cum || 0;
+    const t = Math.max(0, Math.min(1, (d - prevCum)/seg.len));
+    const x = seg.x1 + (seg.x2 - seg.x1)*t;
+    const y = seg.y1 + (seg.y2 - seg.y1)*t;
+    const ang = Math.atan2(seg.y2 - seg.y1, seg.x2 - seg.x1);
+    return {x,y,ang};
+  }
+
+  // ---------- CLIP LIBRARY ----------
+  const clipDefs = [
+    {name:'Aurora', c1:'#00f5ff', c2:'#7c3aed'},
+    {name:'Neon City', c1:'#ff3bff', c2:'#00f5ff'},
+    {name:'Sunset', c1:'#f59e0b', c2:'#ef4444'},
+    {name:'Forest', c1:'#22c55e', c2:'#14b8a6'},
+    {name:'Ocean', c1:'#0ea5e9', c2:'#6366f1'},
+    {name:'Magma', c1:'#f97316', c2:'#dc2626'},
+    {name:'Violet', c1:'#a855f7', c2:'#ec4899'},
+    {name:'Monochrome', c1:'#e2e8f0', c2:'#64748b'},
+  ];
+
+  function makeThumbCanvas(c1,c2,name,idx,total){
+    const w=160,h=90;
+    const c=document.createElement('canvas');c.width=w;c.height=h;
+    const ctx=c.getContext('2d');
+    // bg
+    const g=ctx.createLinearGradient(0,0,w,h);
+    g.addColorStop(0,c1); g.addColorStop(1,c2);
+    ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+    // noise
+    ctx.globalAlpha=.08;
+    for(let i=0;i<300;i++){ctx.fillStyle='#000';ctx.fillRect(Math.random()*w,Math.random()*h,1,1);}
+    ctx.globalAlpha=1;
+    // vignette
+    const vg=ctx.createRadialGradient(w/2,h/2,10,w/2,h/2,w);
+    vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,.45)');
+    ctx.fillStyle=vg; ctx.fillRect(0,0,w,h);
+    // text
+    ctx.fillStyle='rgba(0,0,0,.6)'; ctx.fillRect(0,h-28,w,28);
+    ctx.fillStyle='#fff'; ctx.font='700 14px Inter'; ctx.fillText(name,10,h-10);
+    ctx.font='12px Inter'; ctx.fillStyle='rgba(255,255,255,.8)'; ctx.textAlign='right';
+    ctx.fillText(`${idx+1}/${total}`,w-10,h-10);
+    return c;
+  }
+
+  const clips = clipDefs.map((def,i)=>{
+    const duration = 24 + Math.floor(Math.random()*18); // frames
+    const thumbs=[];
+    for(let f=0;f<duration;f++) thumbs.push(makeThumbCanvas(def.c1,def.c2,def.name,f,duration));
+    return {...def, id:i, duration, thumbs};
+  });
+
+  // Populate library UI
+  const clipListEl = document.getElementById('clipList');
+  clips.forEach(clip=>{
+    const el=document.createElement('div');
+    el.className='clip';
+    el.draggable=true;
+    el.dataset.clipId=clip.id;
+    el.innerHTML=`
+      <div class="clip-thumb"></div>
+      <div class="clip-meta">
+        <div class="clip-name">${clip.name}</div>
+        <div class="clip-sub">${clip.duration} frames • ${ (clip.duration/FPS).toFixed(1)}s</div>
+        <div class="clip-actions">
+          <button class="btn-small" data-add>Add to Timeline</button>
+        </div>
+      </div>`;
+    el.querySelector('.clip-thumb').appendChild(clip.thumbs[0]);
+    clipListEl.appendChild(el);
+    el.addEventListener('dragstart',e=>{
+      e.dataTransfer.setData('text/plain',clip.id);
+      e.dataTransfer.effectAllowed='copy';
+    });
+    el.querySelector('[data-add]').addEventListener('click',()=> addClipToTimeline(clip.id));
+  });
+
+  // ---------- VIEW STATE ----------
+  const view = { offsetX:0, offsetY:0, scale:1, dragging:false, lastX:0,lastY:0 };
+  let isPlaying=false;
+  let playOffset=0; // distance along spiral in pixels
+  let speed=1;
+
+  // ---------- TIMELINE STATE ----------
+  // Frame mode: flat array of frames
+  const timelineFrames = []; // {clipId, frameIdx, thumb, clipName}
+  // Clip mode: array of clip segments
+  const timelineClips = []; // {clipId, startFrame, duration, trimIn, trimOut, clipName}
+  const clipSequence = []; // Source of truth: [{clipId, trimIn, trimOut}]
+
+  // ---------- MODE SWITCH ----------
+  function setTimelineMode(mode) {
+    if (mode === timelineMode) return;
+
+    // Preserve current time when switching
+    const currentTime = getCurrentTime();
+
+    timelineMode = mode;
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+
+    if (mode === 'frames') {
+      rebuildFrameArray();
+      playOffset = currentTime * FPS * FRAME_STEP;
+    } else {
+      rebuildClipArray();
+      playOffset = currentTime * getPixelsPerSecond();
+    }
+
+    updateSpiralLength();
+    updateScrubRange();
+    updateTimecode();
+    updatePreview();
+    updateHudFrames();
+  }
+
+  // ---------- CONVERSION HELPERS ----------
+  function getCurrentTime() {
+    return timelineMode === 'frames'
+      ? playOffset / (FPS * FRAME_STEP)
+      : playOffset / getPixelsPerSecond();
+  }
+
+  function getTotalTime() {
+    return timelineMode === 'frames'
+      ? timelineFrames.length / FPS
+      : timelineClips.reduce((sum, c) => sum + (c.trimOut - c.trimIn + 1) / FPS, 0);
+  }
+
+  function getTotalFrames() {
+    return timelineMode === 'frames'
+      ? timelineFrames.length
+      : timelineClips.reduce((sum, c) => sum + (c.trimOut - c.trimIn + 1), 0);
+  }
+
+  // ---------- BUILDERS ----------
+  function rebuildFrameArray() {
+    timelineFrames.length = 0;
+    clipSequence.forEach(entry => {
+      const clip = clips[entry.clipId];
+      for (let i = entry.trimIn; i <= entry.trimOut; i++) {
+        timelineFrames.push({
+          clipId: clip.id,
+          frameIdx: i,
+          thumb: clip.thumbs[i],
+          clipName: clip.name
+        });
+      }
+    });
+  }
+
+  function rebuildClipArray() {
+    timelineClips.length = 0;
+    let cursorFrame = 0;
+    clipSequence.forEach(entry => {
+      const clip = clips[entry.clipId];
+      const trimIn = entry.trimIn;
+      const trimOut = entry.trimOut;
+      timelineClips.push({
+        clipId: clip.id,
+        startFrame: cursorFrame,
+        duration: trimOut - trimIn + 1,
+        trimIn: trimIn,
+        trimOut: trimOut,
+        clipName: clip.name
+      });
+      cursorFrame += trimOut - trimIn + 1;
+    });
+  }
+
+  function updateSpiralLength() {
+    const needed = getTotalFrames() * FRAME_STEP + 2000;
+    if (needed > totalSpiralLen) spiral = buildSpiral(needed);
+  }
+
+  function updateScrubRange() {
+    const scrubSlider = document.getElementById('scrubSlider');
+    const totalFrames = getTotalFrames();
+    scrubSlider.max = Math.max(0, totalFrames - 1);
+    scrubSlider.value = Math.min(parseInt(scrubSlider.value) || 0, Math.max(0, totalFrames - 1));
+  }
+
+  function updateHudFrames() {
+    const hudFrames = document.getElementById('hudFrames');
+    if (timelineMode === 'frames') {
+      hudFrames.textContent = `${timelineFrames.length} frames`;
+    } else {
+      hudFrames.textContent = `${timelineClips.length} clips`;
+    }
+  }
+
+  // ---------- TIMELINE STATE (legacy wrapper) ----------
+  function rebuildTimelineFromSequence(seq) {
+    clipSequence.length = 0;
+    seq.forEach(entry => clipSequence.push({...entry, trimIn: 0, trimOut: clips[entry.clipId].duration - 1}));
+    rebuildFrameArray();
+    document.getElementById('hudFrames').textContent = `${timelineFrames.length} frames`;
+    updateTimecode();
+    updateScrubRange();
+  }
+
+  function addClipToTimeline(clipId) {
+    const clip = clips[clipId];
+    clipSequence.push({clipId, trimIn: 0, trimOut: clip.duration - 1});
+    rebuildFrameArray();
+    document.getElementById('hudFrames').textContent = `${timelineFrames.length} frames`;
+    updateTimecode();
+    updateScrubRange();
+    updateSpiralLength();
+  }
+
+  // ---------- INPUT ----------
+  timelineCanvas.addEventListener('mousedown',e=>{
+    view.dragging=true;
+    view.lastX=e.clientX; view.lastY=e.clientY;
+    timelineCanvas.classList.add('grabbing');
+  });
+  window.addEventListener('mouseup',()=>{view.dragging=false;timelineCanvas.classList.remove('grabbing')});
+  window.addEventListener('mousemove',e=>{
+    if(!view.dragging) return;
+    view.offsetX += e.clientX - view.lastX;
+    view.offsetY += e.clientY - view.lastY;
+    view.lastX=e.clientX; view.lastY=e.clientY;
+  });
+  timelineCanvas.addEventListener('wheel',e=>{
+    e.preventDefault();
+    const delta = -e.deltaY;
+    const factor = delta>0?1.08:0.92;
+    const mx = e.offsetX - timelineCanvas.clientWidth/2;
+    const my = e.offsetY - timelineCanvas.clientHeight/2;
+    // zoom towards mouse
+    view.offsetX = mx - (mx - view.offsetX)*factor;
+    view.offsetY = my - (my - view.offsetY)*factor;
+    view.scale = Math.max(0.3, Math.min(2.5, view.scale*factor));
+    zoomSlider.value = view.scale;
+    document.getElementById('hudZoom').textContent = Math.round(view.scale*100)+'%';
+  },{passive:false});
+
+  // drag drop
+  timelineCanvas.addEventListener('dragover',e=>e.preventDefault());
+  timelineCanvas.addEventListener('drop',e=>{
+    e.preventDefault();
+    const id = parseInt(e.dataTransfer.getData('text/plain'),10);
+    if(!isNaN(id)) addClipToTimeline(id);
+  });
+
+  // ---------- INITIALIZATION ----------
+  // Initial clips
+  clipSequence.push({clipId:0, trimIn:0, trimOut:clips[0].duration-1});
+  clipSequence.push({clipId:1, trimIn:0, trimOut:clips[1].duration-1});
+  clipSequence.push({clipId:3, trimIn:0, trimOut:clips[3].duration-1});
+  clipSequence.push({clipId:4, trimIn:0, trimOut:clips[4].duration-1});
+  rebuildFrameArray();
+  updateHudFrames();
+
+  // ---------- CONTROLS ----------
+  const playBtn = document.getElementById('playBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const speedSel = document.getElementById('speedSel');
+  const zoomSlider = document.getElementById('zoomSlider');
+  const zoomInBtn = document.getElementById('zoomInBtn');
+  const zoomOutBtn = document.getElementById('zoomOutBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const scrubSlider = document.getElementById('scrubSlider');
+
+  playBtn.addEventListener('click',()=>{isPlaying=!isPlaying;playBtn.textContent=isPlaying?'⏸':'▶'});
+  stopBtn.addEventListener('click',()=>{isPlaying=false;playOffset=0;playBtn.textContent='▶';updatePreview();});
+  speedSel.addEventListener('change',()=>speed=parseFloat(speedSel.value));
+  zoomSlider.addEventListener('input',()=>{
+    view.scale = parseFloat(zoomSlider.value);
+    document.getElementById('hudZoom').textContent = Math.round(view.scale*100)+'%';
+  });
+  zoomInBtn.addEventListener('click',()=>{view.scale=Math.min(2.5,view.scale*1.2);zoomSlider.value=view.scale;});
+  zoomOutBtn.addEventListener('click',()=>{view.scale=Math.max(0.3,view.scale/1.2);zoomSlider.value=view.scale;});
+  resetBtn.addEventListener('click',()=>{view.offsetX=0;view.offsetY=0;view.scale=1;zoomSlider.value=1;document.getElementById('hudZoom').textContent='100%'});
+
+  // Scrub slider
+  scrubSlider.addEventListener('input',()=>{
+    const val = parseInt(scrubSlider.value, 10);
+    if (timelineMode === 'frames') {
+      playOffset = val * FRAME_STEP;
+    } else {
+      playOffset = (val / FPS) * getPixelsPerSecond();
+    }
+    updateTimecode();
+    updatePreview();
+  });
+
+  // Mode toggle
+  document.querySelectorAll('.mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => setTimelineMode(btn.dataset.mode));
+  });
+
+  // Keyboard shortcuts
+  let zPressed = false;
+  window.addEventListener('keydown', e => {
+    if (e.key === 'z' && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      if (!zPressed) {
+        zPressed = true;
+        // Start zoom line on next mousedown
+        timelineCanvas.addEventListener('mousedown', startZoomLineHandler, { once: true });
+      }
+    }
+  });
+
+  window.addEventListener('keyup', e => {
+    if (e.key === 'z') {
+      e.preventDefault();
+      zPressed = false;
+      if (zoomLineActive) {
+        endZoomLine();
+      }
+    }
+  });
+
+  function startZoomLineHandler(e) {
+    startZoomLine(e.clientX, e.clientY);
+    const onMouseMove = e => updateZoomLine(e.clientX, e.clientY);
+    const onMouseUp = () => {
+      endZoomLine();
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }
+
+  // Update scrub slider during playback
+  const originalUpdateTimecode = updateTimecode;
+  updateTimecode = function() {
+    originalUpdateTimecode();
+    // Update scrub slider to match current position
+    if (timelineMode === 'frames') {
+      scrubSlider.value = Math.min(parseInt(playOffset / FRAME_STEP), scrubSlider.max);
+    } else {
+      const frameNum = playOffset / getPixelsPerSecond() * FPS;
+      scrubSlider.value = Math.min(Math.floor(frameNum), scrubSlider.max);
+    }
+  };
+
+  // Initial setup
+  updateHudFrames();
+  updateScrubRange();
+  requestAnimationFrame(render);
+  updatePreview();
+
+   // initial zoom hud
+   document.getElementById('hudZoom').textContent='100%';
+
+  // ---------- HELPER FUNCTIONS ----------
+   function formatTC(frames){
+     const sec = Math.floor(frames/FPS);
+     const f = frames%FPS;
+     const m = Math.floor(sec/60);
+     const s = sec%60;
+     return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(f).padStart(2,'0')}`;
+   }
+   function formatTime(seconds){
+    const sec = Math.floor(seconds);
+    const f = Math.floor((seconds - sec) * FPS);
+    const m = Math.floor(sec/60);
+    const s = sec%60;
+    return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(f).padStart(2,'0')}`;
+  }
+  function updateTimecode(){
+    if (timelineMode === 'frames') {
+      const cur = Math.floor(playOffset/FRAME_STEP);
+      const total = timelineFrames.length;
+      document.getElementById('timecode').textContent = `${formatTC(cur)} / ${formatTC(total)}`;
+    } else {
+      const curTime = getCurrentTime();
+      const totalTime = getTotalTime();
+      document.getElementById('timecode').textContent = `${formatTime(curTime)} / ${formatTime(totalTime)}`;
+    }
+  }
+
+  // ---------- PREVIEW ----------
+  function updatePreview(){
+    const pw = previewCanvas.clientWidth, ph = previewCanvas.clientHeight;
+    pctx.clearRect(0,0,pw,ph);
+    
+    let frame, frameIdx;
+    if (timelineMode === 'frames') {
+      const idx = Math.min(timelineFrames.length-1, Math.max(0, Math.floor(playOffset/FRAME_STEP)));
+      frame = timelineFrames[idx];
+      frameIdx = frame ? frame.frameIdx : 0;
+    } else {
+      const pps = getPixelsPerSecond();
+      const time = playOffset / pps;
+      const frameNum = Math.floor(time * FPS);
+      const totalFrames = getTotalFrames();
+      const idx = Math.min(totalFrames - 1, Math.max(0, frameNum));
+      
+      // Find which clip this frame belongs to
+      let accum = 0;
+      frame = null;
+      for (const clip of timelineClips) {
+        const clipFrames = clip.trimOut - clip.trimIn + 1;
+        if (idx < accum + clipFrames) {
+          const localFrame = clip.trimIn + (idx - accum);
+          frame = { thumb: clips[clip.clipId].thumbs[localFrame], clipName: clip.clipName, frameIdx: localFrame };
+          frameIdx = localFrame;
+          break;
+        }
+        accum += clipFrames;
+      }
+    }
+    
+    if(frame){
+      // fit
+      const tw = frame.thumb.width, th = frame.thumb.height;
+      const scale = Math.min(pw/tw, ph/th);
+      const dw = tw*scale, dh = th*scale;
+      const dx = (pw-dw)/2, dy = (ph-dh)/2;
+      pctx.shadowColor='rgba(0,245,255,.5)';
+      pctx.shadowBlur=30;
+      pctx.drawImage(frame.thumb, dx, dy, dw, dh);
+      pctx.shadowBlur=0;
+      document.getElementById('metaClip').textContent = frame.clipName;
+      document.getElementById('metaFrame').textContent = `${frameIdx+1}`;
+    }else{
+      pctx.fillStyle='#111'; pctx.fillRect(0,0,pw,ph);
+      document.getElementById('metaClip').textContent='—';
+      document.getElementById('metaFrame').textContent='0';
+    }
+  }
+
+   // ---------- ZOOM LINE FEATURE ----------
+   let zoomLineActive = false;
+   let zoomLineStart = { x: 0, y: 0 };
+   let zoomLineEnd = { x: 0, y: 0 };
+
+   function startZoomLine(x, y) {
+    zoomLineActive = true;
+    zoomLineStart = { x, y };
+    zoomLineEnd = { x, y };
+    document.getElementById('zoomLineIndicator').classList.add('active');
+    timelineCanvas.classList.add('zoom-line');
+    window.debugSpiral.zoomLineActive = true;
+  }
+
+  function updateZoomLine(x, y) {
+    if (!zoomLineActive) return;
+    zoomLineEnd = { x, y };
+    window.debugSpiral.zoomLineEnd = { x, y };
+  }
+
+  function endZoomLine() {
+    if (!zoomLineActive) return;
+    zoomLineActive = false;
+    document.getElementById('zoomLineIndicator').classList.remove('active');
+    timelineCanvas.classList.remove('zoom-line');
+    window.debugSpiral.zoomLineActive = false;
+
+    // Calculate zoom based on line length
+    const dx = zoomLineEnd.x - zoomLineStart.x;
+    const dy = zoomLineEnd.y - zoomLineStart.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const zoomFactor = Math.max(0.3, Math.min(2.5, distance / 100));
+
+    // Apply zoom at the starting point
+    const rect = timelineCanvas.getBoundingClientRect();
+    const mx = zoomLineStart.x - rect.left - timelineCanvas.clientWidth / 2;
+    const my = zoomLineStart.y - rect.top - timelineCanvas.clientHeight / 2;
+    const factor = zoomFactor / view.scale;
+    view.offsetX = mx - (mx - view.offsetX) * factor;
+    view.offsetY = my - (my - view.offsetY) * factor;
+    view.scale = zoomFactor;
+    zoomSlider.value = view.scale;
+    document.getElementById('hudZoom').textContent = Math.round(view.scale * 100) + '%';
+  }
+
+  // ---------- RENDER ----------
+  let lastTime=performance.now(), fpsAcc=0, fpsCnt=0;
+  window.debugSpiral = { lastRender: null };
+
+  // Expose zoom line functions for debugging
+  window.debugSpiral.startZoomLine = startZoomLine;
+  window.debugSpiral.updateZoomLine = updateZoomLine;
+  window.debugSpiral.endZoomLine = endZoomLine;
+  window.debugSpiral.getZoomLineState = () => ({ zoomLineActive, zoomLineStart, zoomLineEnd });
+
+  function getThumbInterval() {
+    const s = view.scale;
+    if (s < 0.5) return 9999; // 1 per clip
+    if (s < 1.2) return FPS; // 1 per second
+    if (s < 2.0) return 10; // 1 per 10 frames
+    return 1; // 1 per frame
+  }
+
+  function drawClipMode(tctx, w, h) {
+    const pps = getPixelsPerSecond();
+    const thumbInterval = getThumbInterval();
+
+    timelineClips.forEach(clip => {
+      const clipStartPx = clip.startFrame / FPS * pps;
+      const clipEndPx = (clip.startFrame + clip.duration) / FPS * pps;
+
+      // Skip if clip not visible
+      if (clipEndPx - playOffset < -500 || clipStartPx - playOffset > 500) return;
+
+      const clipData = clips[clip.clipId];
+
+      // Draw clip block
+      const blockStart = pointAtDistance(clipStartPx - playOffset);
+      const blockEnd = pointAtDistance(clipEndPx - playOffset);
+
+      tctx.save();
+      tctx.fillStyle = clipData.c1 || 'rgba(0,245,255,0.3)';
+      tctx.fillRect(blockStart.x, blockStart.y, blockEnd.x - blockStart.x, FRAME_H);
+
+      // Draw adaptive thumbnails
+      for (let f = clip.trimIn; f <= clip.trimOut; f += thumbInterval) {
+        const frameTime = (clip.startFrame + (f - clip.trimIn)) / FPS;
+        const dist = frameTime * pps - playOffset;
+        const {x, y, ang} = pointAtDistance(dist);
+        tctx.save();
+        tctx.translate(x, y);
+        tctx.rotate(ang);
+        tctx.drawImage(clipData.thumbs[f], -FRAME_W/2, -FRAME_H/2, FRAME_W, FRAME_H);
+        tctx.restore();
+      }
+      tctx.restore();
+    });
+  }
+
+  function render(now){
+    const dt = Math.min(0.05, (now-lastTime)/1000);
+    lastTime=now;
+
+    // update play
+    if(isPlaying && getTotalFrames() > 0){
+      const pps = timelineMode === 'frames' ? FPS * FRAME_STEP : getPixelsPerSecond();
+      const advance = speed * pps * dt;
+      playOffset += advance;
+      const maxOffset = getTotalFrames() * (timelineMode === 'frames' ? FRAME_STEP : getPixelsPerSecond() / FPS);
+      if(playOffset >= maxOffset){
+        playOffset = 0; // loop
+      }
+      updateTimecode();
+      updatePreview();
+    }
+
+    // draw timeline
+    const w = timelineCanvas.clientWidth, h = timelineCanvas.clientHeight;
+    tctx.clearRect(0,0,w,h);
+
+    tctx.save();
+    tctx.translate(w/2 + view.offsetX, h/2 + view.offsetY);
+    tctx.scale(view.scale, view.scale);
+
+    // spiral path
+    tctx.lineWidth = 2 / view.scale;
+    tctx.strokeStyle = 'rgba(0,245,255,.25)';
+    tctx.shadowColor='rgba(0,245,255,.5)';
+    tctx.shadowBlur=12;
+    tctx.beginPath();
+    for(let i=1;i<spiral.length;i++){
+      const s=spiral[i];
+      if(i===1) tctx.moveTo(s.x1,s.y1); else tctx.lineTo(s.x1,s.y1);
+      tctx.lineTo(s.x2,s.y2);
+    }
+    tctx.stroke();
+    tctx.shadowBlur=0;
+
+    if (timelineMode === 'frames') {
+      // draw frames along spiral
+      const halfW = w / 2 / view.scale;
+      const halfH = h / 2 / view.scale;
+      const maxVisibleDist = Math.sqrt(halfW * halfW + halfH * halfH);
+      const offsetDist = Math.sqrt(view.offsetX * view.offsetX + view.offsetY * view.offsetY) / view.scale;
+      const effectiveMaxDist = maxVisibleDist + offsetDist + FRAME_STEP * 10;
+
+      const startDist = Math.max(0, playOffset - effectiveMaxDist);
+      const endDist = playOffset + effectiveMaxDist;
+      const timelineEndDist = timelineFrames.length * FRAME_STEP;
+      const startIdx = Math.max(0, Math.floor(startDist / FRAME_STEP) - 2);
+      const endIdx = Math.min(timelineFrames.length - 1, Math.max(Math.ceil(endDist / FRAME_STEP) + 2, Math.ceil(timelineEndDist / FRAME_STEP)));
+
+      let renderedCount = 0;
+      let culledCount = 0;
+
+      for(let i=endIdx;i>=startIdx;i--){
+        const dist = i * FRAME_STEP;
+        const displayDist = dist - playOffset;
+        if(displayDist < -effectiveMaxDist) continue;
+        const {x,y,ang} = pointAtDistance(displayDist);
+        const screenX = (w/2 + view.offsetX + x * view.scale);
+        const screenY = (h/2 + view.offsetY + y * view.scale);
+        if(screenX < -FRAME_W || screenX > w + FRAME_W || screenY < -FRAME_H || screenY > h + FRAME_H) {
+          culledCount++; continue;
+        }
+        const frame = timelineFrames[i];
+        if(!frame) continue;
+        renderedCount++;
+        tctx.save();
+        tctx.translate(x,y);
+        tctx.rotate(ang);
+        tctx.shadowColor='rgba(0,0,0,.7)';
+        tctx.shadowBlur=12;
+        tctx.fillStyle='rgba(255,255,255,.08)';
+        tctx.fillRect(-FRAME_W/2-3,-FRAME_H/2-3,FRAME_W+6,FRAME_H+6);
+        tctx.drawImage(frame.thumb, -FRAME_W/2, -FRAME_H/2, FRAME_W, FRAME_H);
+        const g=tctx.createLinearGradient(-FRAME_W/2, -FRAME_H/2, FRAME_W/2, FRAME_H/2);
+        g.addColorStop(0,'rgba(255,255,255,.12)'); g.addColorStop(1,'rgba(255,255,255,0)');
+        tctx.fillStyle=g;
+        tctx.fillRect(-FRAME_W/2,-FRAME_H/2,FRAME_W,FRAME_H);
+        tctx.fillStyle='rgba(0,0,0,.7)';
+        tctx.fillRect(-FRAME_W/2, FRAME_H/2-14, 38,14);
+        tctx.fillStyle='#00f5ff';
+        tctx.font='10px monospace';
+        tctx.fillText(String(i).padStart(4,'0'), -FRAME_W/2+4, FRAME_H/2-4);
+        tctx.restore();
+      }
+
+      window.debugSpiral.lastRender = {
+        mode: 'frames',
+        maxVisibleDist,
+        effectiveMaxDist,
+        timelineEndDist,
+        startIdx,
+        endIdx,
+        renderedCount,
+        culledCount,
+        totalFrames: timelineFrames.length,
+        viewScale: view.scale,
+        playOffset
+      };
+    } else {
+      // Clip mode
+      drawClipMode(tctx, w, h);
+
+      window.debugSpiral.lastRender = {
+        mode: 'clips',
+        clipCount: timelineClips.length,
+        viewScale: view.scale,
+        playOffset
+      };
+    }
+
+    // Draw zoom line if active
+    if (zoomLineActive) {
+      tctx.save();
+      tctx.restore(); // Reset transform for screen-space drawing
+      tctx.strokeStyle = 'rgba(255,59,255,.9)';
+      tctx.lineWidth = 2;
+      tctx.setLineDash([5, 5]);
+      tctx.beginPath();
+      tctx.moveTo(zoomLineStart.x - timelineCanvas.getBoundingClientRect().left, zoomLineStart.y - timelineCanvas.getBoundingClientRect().top);
+      tctx.lineTo(zoomLineEnd.x - timelineCanvas.getBoundingClientRect().left, zoomLineEnd.y - timelineCanvas.getBoundingClientRect().top);
+      tctx.stroke();
+      tctx.setLineDash([]);
+    }
+
+    // playhead at center
+    tctx.save();
+    tctx.shadowColor='rgba(255,59,255,.9)';
+    tctx.shadowBlur=25;
+    tctx.strokeStyle='rgba(255,59,255,.9)';
+    tctx.lineWidth=3;
+    tctx.beginPath();
+    tctx.arc(0,0,22,0,Math.PI*2);
+    tctx.stroke();
+    tctx.shadowBlur=0;
+    tctx.strokeStyle='rgba(255,59,255,.9)';
+    tctx.lineWidth=2;
+    tctx.beginPath();
+    tctx.moveTo(-30,0); tctx.lineTo(-10,0);
+    tctx.moveTo(10,0); tctx.lineTo(30,0);
+    tctx.moveTo(0,-30); tctx.lineTo(0,-10);
+    tctx.moveTo(0,10); tctx.lineTo(0,30);
+    tctx.stroke();
+    tctx.fillStyle='#ff3bff';
+    tctx.beginPath(); tctx.arc(0,0,4,0,Math.PI*2); tctx.fill();
+    tctx.restore();
+
+    tctx.restore();
+
+    // FPS counter
+    fpsAcc += 1/dt; fpsCnt++;
+    if(fpsCnt>30){
+      document.getElementById('hudFps').textContent = Math.round(fpsAcc/fpsCnt) + ' FPS';
+      fpsAcc=0; fpsCnt=0;
+    }
+
+    requestAnimationFrame(render);
+  }
+  requestAnimationFrame(render);
+  updatePreview();
+
+  // initial zoom hud
+  document.getElementById('hudZoom').textContent='100%';
+})();
+</script>
+</body>
+</html>
