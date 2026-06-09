@@ -221,6 +221,7 @@
     cursor:grab;
   }
   #timeline.grabbing{cursor:grabbing}
+  #timeline.zoom-line{cursor:crosshair}
   .hud{
     position:absolute;
     top:12px;left:12px;
@@ -602,7 +603,7 @@
 
     updateSpiralLength();
     updateScrubRange();
-    updateTimecode();
+    updateTimecodeWithScrub();
     updatePreview();
     updateHudFrames();
   }
@@ -688,7 +689,7 @@
     seq.forEach(entry => clipSequence.push({...entry, trimIn: 0, trimOut: clips[entry.clipId].duration - 1}));
     rebuildFrameArray();
     document.getElementById('hudFrames').textContent = `${timelineFrames.length} frames`;
-    updateTimecode();
+    updateTimecodeWithScrub();
     updateScrubRange();
   }
 
@@ -697,23 +698,61 @@
     clipSequence.push({clipId, trimIn: 0, trimOut: clip.duration - 1});
     rebuildFrameArray();
     document.getElementById('hudFrames').textContent = `${timelineFrames.length} frames`;
-    updateTimecode();
+    updateTimecodeWithScrub();
     updateScrubRange();
     updateSpiralLength();
   }
 
-  // ---------- INPUT ----------
-  timelineCanvas.addEventListener('mousedown',e=>{
-    view.dragging=true;
-    view.lastX=e.clientX; view.lastY=e.clientY;
-    timelineCanvas.classList.add('grabbing');
+  // Keyboard shortcuts
+  let zPressed = false;
+  window.addEventListener('keydown', e => {
+    if (e.key === 'z' && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      if (!zPressed) {
+        zPressed = true;
+        zoomLineActive = true;
+        zoomLineBaseScale = view.scale;
+        // Reference point is where the mouse cursor is on the canvas
+        zoomLineStart = { x: lastMouseX, y: lastMouseY };
+        zoomLineEnd = { ...zoomLineStart };
+        document.getElementById('zoomLineIndicator').classList.add('active');
+        timelineCanvas.classList.add('zoom-line');
+        timelineCanvas.style.cursor = 'crosshair';
+      } else {
+        zPressed = false;
+        zoomLineActive = false;
+        document.getElementById('zoomLineIndicator').classList.remove('active');
+        timelineCanvas.classList.remove('zoom-line');
+        timelineCanvas.style.cursor = '';
+      }
+    }
   });
-  window.addEventListener('mouseup',()=>{view.dragging=false;timelineCanvas.classList.remove('grabbing')});
-  window.addEventListener('mousemove',e=>{
-    if(!view.dragging) return;
+
+  // Mousemove: handle zoom line vs panning
+  let lastMouseX = 0, lastMouseY = 0;
+  window.addEventListener('mousemove', e => {
+    lastMouseX = e.clientX;
+    lastMouseY = e.clientY;
+    if (zoomLineActive) {
+      applyZoomFromLine(e.clientX, e.clientY);
+      return;
+    }
+    if (!view.dragging) return;
     view.offsetX += e.clientX - view.lastX;
     view.offsetY += e.clientY - view.lastY;
-    view.lastX=e.clientX; view.lastY=e.clientY;
+    view.lastX = e.clientX; view.lastY = e.clientY;
+  });
+
+  timelineCanvas.addEventListener('mousedown', e => {
+    if (zoomLineActive) return;
+    view.dragging = true;
+    view.lastX = e.clientX; view.lastY = e.clientY;
+    timelineCanvas.classList.add('grabbing');
+  });
+
+  window.addEventListener('mouseup', () => {
+    view.dragging = false;
+    timelineCanvas.classList.remove('grabbing');
   });
   timelineCanvas.addEventListener('wheel',e=>{
     e.preventDefault();
@@ -757,7 +796,7 @@
   const scrubSlider = document.getElementById('scrubSlider');
 
   playBtn.addEventListener('click',()=>{isPlaying=!isPlaying;playBtn.textContent=isPlaying?'⏸':'▶'});
-  stopBtn.addEventListener('click',()=>{isPlaying=false;playOffset=0;playBtn.textContent='▶';updatePreview();});
+  stopBtn.addEventListener('click',()=>{isPlaying=false;playOffset=0;playBtn.textContent='▶';updateTimecodeWithScrub();updatePreview();});
   speedSel.addEventListener('change',()=>speed=parseFloat(speedSel.value));
   zoomSlider.addEventListener('input',()=>{
     view.scale = parseFloat(zoomSlider.value);
@@ -775,7 +814,7 @@
     } else {
       playOffset = (val / FPS) * getPixelsPerSecond();
     }
-    updateTimecode();
+    updateTimecodeWithScrub();
     updatePreview();
   });
 
@@ -784,53 +823,17 @@
     btn.addEventListener('click', () => setTimelineMode(btn.dataset.mode));
   });
 
-  // Keyboard shortcuts
-  let zPressed = false;
-  window.addEventListener('keydown', e => {
-    if (e.key === 'z' && !e.ctrlKey && !e.metaKey) {
-      e.preventDefault();
-      if (!zPressed) {
-        zPressed = true;
-        // Start zoom line on next mousedown
-        timelineCanvas.addEventListener('mousedown', startZoomLineHandler, { once: true });
-      }
-    }
-  });
-
-  window.addEventListener('keyup', e => {
-    if (e.key === 'z') {
-      e.preventDefault();
-      zPressed = false;
-      if (zoomLineActive) {
-        endZoomLine();
-      }
-    }
-  });
-
-  function startZoomLineHandler(e) {
-    startZoomLine(e.clientX, e.clientY);
-    const onMouseMove = e => updateZoomLine(e.clientX, e.clientY);
-    const onMouseUp = () => {
-      endZoomLine();
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-    };
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-  }
-
   // Update scrub slider during playback
-  const originalUpdateTimecode = updateTimecode;
-  updateTimecode = function() {
-    originalUpdateTimecode();
+  function updateTimecodeWithScrub() {
+    updateTimecode();
     // Update scrub slider to match current position
     if (timelineMode === 'frames') {
-      scrubSlider.value = Math.min(parseInt(playOffset / FRAME_STEP), scrubSlider.max);
+      scrubSlider.value = Math.min(Math.floor(playOffset / FRAME_STEP), scrubSlider.max);
     } else {
-      const frameNum = playOffset / getPixelsPerSecond() * FPS;
-      scrubSlider.value = Math.min(Math.floor(frameNum), scrubSlider.max);
+      const frameNum = Math.floor(playOffset / getPixelsPerSecond() * FPS);
+      scrubSlider.value = Math.min(frameNum, scrubSlider.max);
     }
-  };
+  }
 
   // Initial setup
   updateHudFrames();
@@ -923,43 +926,33 @@
    let zoomLineActive = false;
    let zoomLineStart = { x: 0, y: 0 };
    let zoomLineEnd = { x: 0, y: 0 };
+   let zoomLineBaseScale = 1;
 
-   function startZoomLine(x, y) {
-    zoomLineActive = true;
-    zoomLineStart = { x, y };
-    zoomLineEnd = { x, y };
-    document.getElementById('zoomLineIndicator').classList.add('active');
-    timelineCanvas.classList.add('zoom-line');
-    window.debugSpiral.zoomLineActive = true;
-  }
-
-  function updateZoomLine(x, y) {
+   function applyZoomFromLine(x, y) {
     if (!zoomLineActive) return;
     zoomLineEnd = { x, y };
-    window.debugSpiral.zoomLineEnd = { x, y };
-  }
 
-  function endZoomLine() {
-    if (!zoomLineActive) return;
-    zoomLineActive = false;
-    document.getElementById('zoomLineIndicator').classList.remove('active');
-    timelineCanvas.classList.remove('zoom-line');
-    window.debugSpiral.zoomLineActive = false;
-
-    // Calculate zoom based on line length
+    // Signed horizontal distance: right = zoom in, left = zoom out
     const dx = zoomLineEnd.x - zoomLineStart.x;
     const dy = zoomLineEnd.y - zoomLineStart.y;
     const distance = Math.sqrt(dx * dx + dy * dy);
-    const zoomFactor = Math.max(0.3, Math.min(2.5, distance / 100));
 
-    // Apply zoom at the starting point
+    // Use sign of dx to determine direction
+    const sign = dx >= 0 ? 1 : -1;
     const rect = timelineCanvas.getBoundingClientRect();
-    const mx = zoomLineStart.x - rect.left - timelineCanvas.clientWidth / 2;
-    const my = zoomLineStart.y - rect.top - timelineCanvas.clientHeight / 2;
-    const factor = zoomFactor / view.scale;
+    const baseline = Math.sqrt(rect.width * rect.width + rect.height * rect.height) / 2;
+    const ratio = distance / baseline;
+    const newScale = Math.max(0.3, Math.min(2.5, zoomLineBaseScale + sign * ratio * 2.2));
+
+    // Zoom toward the reference point (where cursor was when Z was pressed)
+    const refX = zoomLineStart.x - rect.left;
+    const refY = zoomLineStart.y - rect.top;
+    const mx = refX - rect.width / 2;
+    const my = refY - rect.height / 2;
+    const factor = newScale / view.scale;
     view.offsetX = mx - (mx - view.offsetX) * factor;
     view.offsetY = my - (my - view.offsetY) * factor;
-    view.scale = zoomFactor;
+    view.scale = newScale;
     zoomSlider.value = view.scale;
     document.getElementById('hudZoom').textContent = Math.round(view.scale * 100) + '%';
   }
@@ -968,11 +961,8 @@
   let lastTime=performance.now(), fpsAcc=0, fpsCnt=0;
   window.debugSpiral = { lastRender: null };
 
-  // Expose zoom line functions for debugging
-  window.debugSpiral.startZoomLine = startZoomLine;
-  window.debugSpiral.updateZoomLine = updateZoomLine;
-  window.debugSpiral.endZoomLine = endZoomLine;
-  window.debugSpiral.getZoomLineState = () => ({ zoomLineActive, zoomLineStart, zoomLineEnd });
+  // Expose zoom line state for debugging
+  window.debugSpiral.getZoomLineState = () => ({ zoomLineActive, zoomLineStart, zoomLineEnd, zoomLineBaseScale });
 
   function getThumbInterval() {
     const s = view.scale;
@@ -1027,11 +1017,14 @@
       const pps = timelineMode === 'frames' ? FPS * FRAME_STEP : getPixelsPerSecond();
       const advance = speed * pps * dt;
       playOffset += advance;
-      const maxOffset = getTotalFrames() * (timelineMode === 'frames' ? FRAME_STEP : getPixelsPerSecond() / FPS);
-      if(playOffset >= maxOffset){
-        playOffset = 0; // loop
+      const totalFrames = getTotalFrames();
+      const maxDist = timelineMode === 'frames'
+        ? totalFrames * FRAME_STEP
+        : (totalFrames / FPS) * getPixelsPerSecond();
+      if(playOffset >= maxDist){
+        playOffset = 0;
       }
-      updateTimecode();
+      updateTimecodeWithScrub();
       updatePreview();
     }
 
@@ -1132,22 +1125,41 @@
       };
     }
 
-    // Draw zoom line if active
+    // Draw zoom line if active (in screen space, outside the spiral transform)
+    tctx.restore();
     if (zoomLineActive) {
+      const rect = timelineCanvas.getBoundingClientRect();
+      const sx = zoomLineStart.x - rect.left;
+      const sy = zoomLineStart.y - rect.top;
+      const ex = zoomLineEnd.x - rect.left;
+      const ey = zoomLineEnd.y - rect.top;
       tctx.save();
-      tctx.restore(); // Reset transform for screen-space drawing
       tctx.strokeStyle = 'rgba(255,59,255,.9)';
       tctx.lineWidth = 2;
-      tctx.setLineDash([5, 5]);
+      tctx.setLineDash([8, 6]);
       tctx.beginPath();
-      tctx.moveTo(zoomLineStart.x - timelineCanvas.getBoundingClientRect().left, zoomLineStart.y - timelineCanvas.getBoundingClientRect().top);
-      tctx.lineTo(zoomLineEnd.x - timelineCanvas.getBoundingClientRect().left, zoomLineEnd.y - timelineCanvas.getBoundingClientRect().top);
+      tctx.moveTo(sx, sy);
+      tctx.lineTo(ex, ey);
       tctx.stroke();
       tctx.setLineDash([]);
+      // Draw start dot and end dot
+      tctx.fillStyle = 'rgba(255,59,255,.9)';
+      tctx.beginPath(); tctx.arc(sx, sy, 5, 0, Math.PI * 2); tctx.fill();
+      tctx.fillStyle = '#ff3bff';
+      tctx.beginPath(); tctx.arc(ex, ey, 5, 0, Math.PI * 2); tctx.fill();
+      // Draw distance label with live zoom value
+      const midX = (sx + ex) / 2, midY = (sy + ey) / 2;
+      tctx.fillStyle = 'rgba(255,59,255,.8)';
+      tctx.font = '11px monospace';
+      tctx.textAlign = 'center';
+      tctx.fillText(`~${Math.round(view.scale * 100)}%`, midX, midY - 8);
+      tctx.restore();
     }
 
-    // playhead at center
+    // playhead at center (reapply spiral transform)
     tctx.save();
+    tctx.translate(w/2 + view.offsetX, h/2 + view.offsetY);
+    tctx.scale(view.scale, view.scale);
     tctx.shadowColor='rgba(255,59,255,.9)';
     tctx.shadowBlur=25;
     tctx.strokeStyle='rgba(255,59,255,.9)';
@@ -1166,8 +1178,6 @@
     tctx.stroke();
     tctx.fillStyle='#ff3bff';
     tctx.beginPath(); tctx.arc(0,0,4,0,Math.PI*2); tctx.fill();
-    tctx.restore();
-
     tctx.restore();
 
     // FPS counter
