@@ -637,63 +637,37 @@
 
   let clips = [];
 
+  // ---------- MEDIABUNNY LOADER ----------
+  let _mb = null;
+  async function getMediabunny() {
+    if (!_mb) _mb = await import('https://esm.sh/mediabunny@1.45.4');
+    return _mb;
+  }
+
   // ---------- VIDEO FRAME EXTRACTION ----------
-  function extractFramesFromVideo(videoSrc, fps, w, h) {
-    return new Promise((resolve, reject) => {
-      const video = document.createElement('video');
-      video.preload = 'auto';
-      video.muted = true;
-      video.playsInline = true;
-      video.src = videoSrc;
-      const capCvs = document.createElement('canvas');
-      capCvs.width = w; capCvs.height = h;
-      const capCtx = capCvs.getContext('2d');
-      const frames = {};
-      let lastCap = -1;
-      const total = fps * 3; // 3 second videos
-      let raf = null;
-      function loop() {
-        const cur = Math.floor(video.currentTime * fps);
-        if (cur > lastCap && cur < total && !frames[cur]) {
-          capCtx.drawImage(video, 0, 0, w, h);
-          const fc = document.createElement('canvas');
-          fc.width = w; fc.height = h;
-          fc.getContext('2d').drawImage(capCvs, 0, 0);
-          frames[cur] = fc;
-          lastCap = cur;
-        }
-        if (video.ended || cur >= total - 1) {
-          cancelAnimationFrame(raf);
-          video.pause(); video.remove();
-          // Fill gaps with nearest captured frame, then flatten to array
-          const out = [];
-          let prev = frames[0];
-          for (let i = 0; i < total; i++) {
-            if (frames[i]) prev = frames[i];
-            else if (!prev) continue;
-            const fc = document.createElement('canvas');
-            fc.width = w; fc.height = h;
-            fc.getContext('2d').drawImage(prev, 0, 0);
-            out.push(fc);
-          }
-          console.log(`📽 captured ${Object.keys(frames).length}/${total} frames`);
-          resolve(out);
-        } else {
-          raf = requestAnimationFrame(loop);
-        }
-      }
-      video.onloadedmetadata = () => {
-        video.play().then(() => { raf = requestAnimationFrame(loop); }).catch(reject);
-      };
-      video.onerror = () => reject(new Error('Failed to load ' + videoSrc));
-      video.load();
-    });
+  async function extractFramesFromVideo(videoSrc, fps, w, h) {
+    const { Input, UrlSource, ALL_FORMATS, VideoSampleSink } = await getMediabunny();
+    const input = new Input({ source: new UrlSource(videoSrc), formats: ALL_FORMATS });
+    const track = await input.getPrimaryVideoTrack();
+    const sink = new VideoSampleSink(track);
+    const duration = await input.computeDuration();
+    const totalFrames = Math.ceil(duration * fps);
+    const frames = [];
+    for (let i = 0; i < totalFrames; i++) {
+      const sample = await sink.getSample(i / fps);
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      sample.draw(c.getContext('2d'), 0, 0, w, h);
+      frames.push(c);
+      sample.close();
+    }
+    return frames;
   }
 
   // ---------- INDEXED DB CACHE ----------
   function openClipDB() {
     return new Promise((resolve, reject) => {
-      const req = indexedDB.open('SpiralCut', 4);
+      const req = indexedDB.open('SpiralCut', 5);
       req.onupgradeneeded = () => {
         if (req.result.objectStoreNames.contains('clipFrames'))
           req.result.deleteObjectStore('clipFrames');
@@ -743,47 +717,62 @@
   // ---------- CLIP LOADING ----------
   async function loadVideoClips() {
     const db = await openClipDB();
-    const loaded = [];
     const statusEl = document.getElementById('hudFps');
-    for (const def of clipDefs) {
+    for (let i = 0; i < clipDefs.length; i++) {
+      const def = clipDefs[i];
       statusEl.textContent = `Loading ${def.name}...`;
       let thumbs = await loadCachedFrames(db, def.name);
       if (!thumbs) {
         statusEl.textContent = `Extracting ${def.name}...`;
         thumbs = await extractFramesFromVideo(def.file, FPS, 160, 90);
         await cacheClipFrames(db, def.name, thumbs);
-        statusEl.textContent = `${def.name} cached ✓`;
       }
-      loaded.push({ ...def, id: loaded.length, duration: thumbs.length, thumbs });
+      const clip = { ...def, id: i, duration: thumbs.length, thumbs };
+      clips.push(clip);
+      buildClipListEntry(clip);
+      statusEl.textContent = `${def.name} ✓`;
     }
-    return loaded;
+    // All clips loaded — build the default timeline
+    initTimelineSequence();
   }
 
-  function buildClipListUI() {
+  function initTimelineSequence() {
+    clipSequence.length = 0;
+    clipSequence.push({clipId:0, trimIn:0, trimOut:clips[0].duration-1});
+    clipSequence.push({clipId:1, trimIn:0, trimOut:clips[1].duration-1});
+    clipSequence.push({clipId:2, trimIn:0, trimOut:clips[2].duration-1});
+    rebuildFrameArray();
+    updateScrubRange();
+    updateSpiralLength();
+    rebuildScene();
+    updateTimecodeWithScrub();
+    updatePreview();
+    updateHudFrames();
+    document.getElementById('hudFrames').textContent = `${timelineFrames.length} frames`;
+  }
+
+  function buildClipListEntry(clip) {
     const clipListEl = document.getElementById('clipList');
-    clipListEl.innerHTML = '';
-    clips.forEach(clip => {
-      const el = document.createElement('div');
-      el.className = 'clip';
-      el.draggable = true;
-      el.dataset.clipId = clip.id;
-      el.innerHTML = `
-        <div class="clip-thumb"></div>
-        <div class="clip-meta">
-          <div class="clip-name">${clip.name}</div>
-          <div class="clip-sub">${clip.duration} frames • ${(clip.duration/FPS).toFixed(1)}s</div>
-          <div class="clip-actions">
-            <button class="btn-small" data-add>Add to Timeline</button>
-          </div>
-        </div>`;
-      el.querySelector('.clip-thumb').appendChild(clip.thumbs[0]);
-      clipListEl.appendChild(el);
-      el.addEventListener('dragstart', e => {
-        e.dataTransfer.setData('text/plain', clip.id);
-        e.dataTransfer.effectAllowed = 'copy';
-      });
-      el.querySelector('[data-add]').addEventListener('click', () => addClipToTimeline(clip.id));
+    const el = document.createElement('div');
+    el.className = 'clip';
+    el.draggable = true;
+    el.dataset.clipId = clip.id;
+    el.innerHTML = `
+      <div class="clip-thumb"></div>
+      <div class="clip-meta">
+        <div class="clip-name">${clip.name}</div>
+        <div class="clip-sub">${clip.duration} frames • ${(clip.duration/FPS).toFixed(1)}s</div>
+        <div class="clip-actions">
+          <button class="btn-small" data-add>Add to Timeline</button>
+        </div>
+      </div>`;
+    el.querySelector('.clip-thumb').appendChild(clip.thumbs[0]);
+    clipListEl.appendChild(el);
+    el.addEventListener('dragstart', e => {
+      e.dataTransfer.setData('text/plain', clip.id);
+      e.dataTransfer.effectAllowed = 'copy';
     });
+    el.querySelector('[data-add]').addEventListener('click', () => addClipToTimeline(clip.id));
   }
 
   // ---------- VIEW STATE ----------
@@ -1708,7 +1697,8 @@
       timelineDensity = t.density; playheadSpeedMultiplier = t.speedMultiplier; playOffset = t.playOffset;
       // Rebuild everything
       rebuildFrameArray(); rebuildClipArray();
-      buildClipListUI();
+      document.getElementById('clipList').innerHTML = '';
+      clips.forEach(c => buildClipListEntry(c));
       updateScrubRange(); updateTimecodeWithScrub(); updatePreview();
       updateSpiralLength(); rebuildScene(); markersDirty = true;
       document.getElementById('hudFrames').textContent =
@@ -1725,20 +1715,7 @@
   // ---------- BOOT ----------
   setTimeout(async () => {
     try {
-      // Step 1: Load video clips (from IndexedDB cache or extract frames)
-      document.getElementById('hudFps').textContent = 'Loading clips...';
-      clips = await loadVideoClips();
-      buildClipListUI();
-
-      // Step 2: Initialize default clip sequence (first 3 clips)
-      clipSequence.length = 0;
-      clipSequence.push({clipId:0, trimIn:0, trimOut:clips[0].duration-1});
-      clipSequence.push({clipId:1, trimIn:0, trimOut:clips[1].duration-1});
-      clipSequence.push({clipId:2, trimIn:0, trimOut:clips[2].duration-1});
-      rebuildFrameArray();
-      updateHudFrames();
-
-      // Step 3: Resize and init PixiJS
+      // Step 1: Init PixiJS immediately — draw empty spiral, enable zoom/pan
       resizeAll();
       if (typeof PIXI === 'undefined') {
         document.getElementById('hudFps').textContent = 'PixiJS failed to load';
@@ -1746,15 +1723,15 @@
       }
       sg = await initPixiApp();
       appReady = true;
-      rebuildScene();
+      rebuildScene(); // draws spiral path, no frames yet
       app.ticker.add(tickerCallback);
-
-      updateTimecodeWithScrub();
-      updatePreview();
       document.getElementById('hudZoom').textContent = '100%';
-      document.getElementById('hudFrames').textContent = `${timelineFrames.length} frames`;
+      document.getElementById('hudFrames').textContent = 'Loading clips...';
       lastFpsTime = performance.now();
       lastZoomScale = view.scale;
+
+      // Step 2: Load video clips in background (progressive — UI updates per clip)
+      loadVideoClips();
     } catch (err) {
       document.getElementById('hudFps').textContent = 'Boot error: ' + err.message;
       console.error('Boot error:', err);
