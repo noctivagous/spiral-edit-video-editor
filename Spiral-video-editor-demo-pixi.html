@@ -382,6 +382,9 @@
         <div class="controls-group">
           <button class="icon-btn primary" id="playBtn" title="Play/Pause">▶</button>
           <button class="icon-btn" id="stopBtn" title="Stop">■</button>
+          <span style="width:1px;height:24px;background:var(--border);margin:0 4px"></span>
+          <button class="icon-btn" id="saveBtn" title="Save Project" style="font-size:16px">💾</button>
+          <button class="icon-btn" id="loadBtn" title="Load Project" style="font-size:16px">📂</button>
         </div>
         <div class="controls-group">
           <label style="font-size:12px;color:var(--text-dim)">Speed</label>
@@ -627,66 +630,139 @@
 
   // ---------- CLIP LIBRARY ----------
   const clipDefs = [
-    {name:'Aurora', c1:'#00f5ff', c2:'#7c3aed'},
-    {name:'Neon City', c1:'#ff3bff', c2:'#00f5ff'},
-    {name:'Sunset', c1:'#f59e0b', c2:'#ef4444'},
-    {name:'Forest', c1:'#22c55e', c2:'#14b8a6'},
-    {name:'Ocean', c1:'#0ea5e9', c2:'#6366f1'},
-    {name:'Magma', c1:'#f97316', c2:'#dc2626'},
-    {name:'Violet', c1:'#a855f7', c2:'#ec4899'},
-    {name:'Monochrome', c1:'#e2e8f0', c2:'#64748b'},
+    {name:'Ocean Drone', file:'media/ocean-drone-at-dusk.mp4', c1:'#0ea5e9', c2:'#6366f1'},
+    {name:'Ocean Beach', file:'media/ocean-onto-beach.mp4', c1:'#f59e0b', c2:'#ef4444'},
+    {name:'Into Forest', file:'media/ocean-into-forest.mp4', c1:'#22c55e', c2:'#14b8a6'},
   ];
 
-  function makeThumbCanvas(c1,c2,name,idx,total) {
-    const w=160,h=90;
-    const c=document.createElement('canvas');c.width=w;c.height=h;
-    const ctx=c.getContext('2d');
-    const g=ctx.createLinearGradient(0,0,w,h);
-    g.addColorStop(0,c1); g.addColorStop(1,c2);
-    ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
-    ctx.globalAlpha=.08;
-    for(let i=0;i<300;i++){ctx.fillStyle='#000';ctx.fillRect(Math.random()*w,Math.random()*h,1,1);}
-    ctx.globalAlpha=1;
-    const vg=ctx.createRadialGradient(w/2,h/2,10,w/2,h/2,w);
-    vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,.45)');
-    ctx.fillStyle=vg; ctx.fillRect(0,0,w,h);
-    ctx.fillStyle='rgba(0,0,0,.6)'; ctx.fillRect(0,h-28,w,28);
-    ctx.fillStyle='#fff'; ctx.font='700 14px Inter'; ctx.fillText(name,10,h-10);
-    ctx.font='12px Inter'; ctx.fillStyle='rgba(255,255,255,.8)'; ctx.textAlign='right';
-    ctx.fillText(`${idx+1}/${total}`,w-10,h-10);
-    return c;
+  let clips = [];
+
+  // ---------- VIDEO FRAME EXTRACTION ----------
+  function extractFramesFromVideo(videoSrc, fps, w, h) {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video');
+      video.preload = 'auto';
+      video.muted = true;
+      video.playsInline = true;
+      video.src = videoSrc;
+      video.onloadedmetadata = async () => {
+        const totalFrames = Math.ceil(video.duration * fps);
+        const frames = [];
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        for (let i = 0; i < totalFrames; i++) {
+          video.currentTime = i / fps;
+          await new Promise(r => { video.onseeked = r; });
+          ctx.drawImage(video, 0, 0, w, h);
+          const fc = document.createElement('canvas');
+          fc.width = w; fc.height = h;
+          fc.getContext('2d').drawImage(canvas, 0, 0);
+          frames.push(fc);
+        }
+        video.remove();
+        resolve(frames);
+      };
+      video.onerror = () => reject(new Error('Failed to load ' + videoSrc));
+      video.load();
+    });
   }
 
-  const clips = clipDefs.map((def,i)=>{
-    const duration = 24 + Math.floor(Math.random()*18);
-    const thumbs=[];
-    for(let f=0;f<duration;f++) thumbs.push(makeThumbCanvas(def.c1,def.c2,def.name,f,duration));
-    return {...def, id:i, duration, thumbs};
-  });
-
-  const clipListEl = document.getElementById('clipList');
-  clips.forEach(clip=>{
-    const el=document.createElement('div');
-    el.className='clip';
-    el.draggable=true;
-    el.dataset.clipId=clip.id;
-    el.innerHTML=`
-      <div class="clip-thumb"></div>
-      <div class="clip-meta">
-        <div class="clip-name">${clip.name}</div>
-        <div class="clip-sub">${clip.duration} frames • ${(clip.duration/FPS).toFixed(1)}s</div>
-        <div class="clip-actions">
-          <button class="btn-small" data-add>Add to Timeline</button>
-        </div>
-      </div>`;
-    el.querySelector('.clip-thumb').appendChild(clip.thumbs[0]);
-    clipListEl.appendChild(el);
-    el.addEventListener('dragstart',e=>{
-      e.dataTransfer.setData('text/plain',clip.id);
-      e.dataTransfer.effectAllowed='copy';
+  // ---------- INDEXED DB CACHE ----------
+  function openClipDB() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('SpiralCut', 1);
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains('clipFrames'))
+          req.result.createObjectStore('clipFrames', { keyPath: 'id' });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
     });
-    el.querySelector('[data-add]').addEventListener('click',()=> addClipToTimeline(clip.id));
-  });
+  }
+
+  async function loadCachedFrames(db, id) {
+    const tx = db.transaction('clipFrames');
+    const req = tx.objectStore('clipFrames').get(id);
+    const data = await new Promise((resolve, reject) => {
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    if (!data) return null;
+    const frames = await Promise.all(data.frames.map(url => {
+      return new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => {
+          const c = document.createElement('canvas');
+          c.width = img.width; c.height = img.height;
+          c.getContext('2d').drawImage(img, 0, 0);
+          resolve(c);
+        };
+        img.src = url;
+      });
+    }));
+    return frames;
+  }
+
+  async function cacheClipFrames(db, id, frames) {
+    try {
+      const tx = db.transaction('clipFrames', 'readwrite');
+      tx.objectStore('clipFrames').put({ id, frames: frames.map(c => c.toDataURL()) });
+      await new Promise((resolve, reject) => {
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch (e) {
+      console.warn('IDB cache skipped (tainted canvas):', e.message);
+    }
+  }
+
+  // ---------- CLIP LOADING ----------
+  async function loadVideoClips() {
+    const db = await openClipDB();
+    const loaded = [];
+    const statusEl = document.getElementById('hudFps');
+    for (const def of clipDefs) {
+      statusEl.textContent = `Loading ${def.name}...`;
+      let thumbs = await loadCachedFrames(db, def.name);
+      if (!thumbs) {
+        statusEl.textContent = `Extracting ${def.name}...`;
+        thumbs = await extractFramesFromVideo(def.file, FPS, 160, 90);
+        await cacheClipFrames(db, def.name, thumbs);
+        statusEl.textContent = `${def.name} cached ✓`;
+      }
+      loaded.push({ ...def, id: loaded.length, duration: thumbs.length, thumbs });
+    }
+    return loaded;
+  }
+
+  function buildClipListUI() {
+    const clipListEl = document.getElementById('clipList');
+    clipListEl.innerHTML = '';
+    clips.forEach(clip => {
+      const el = document.createElement('div');
+      el.className = 'clip';
+      el.draggable = true;
+      el.dataset.clipId = clip.id;
+      el.innerHTML = `
+        <div class="clip-thumb"></div>
+        <div class="clip-meta">
+          <div class="clip-name">${clip.name}</div>
+          <div class="clip-sub">${clip.duration} frames • ${(clip.duration/FPS).toFixed(1)}s</div>
+          <div class="clip-actions">
+            <button class="btn-small" data-add>Add to Timeline</button>
+          </div>
+        </div>`;
+      el.querySelector('.clip-thumb').appendChild(clip.thumbs[0]);
+      clipListEl.appendChild(el);
+      el.addEventListener('dragstart', e => {
+        e.dataTransfer.setData('text/plain', clip.id);
+        e.dataTransfer.effectAllowed = 'copy';
+      });
+      el.querySelector('[data-add]').addEventListener('click', () => addClipToTimeline(clip.id));
+    });
+  }
 
   // ---------- VIEW STATE ----------
   const view = { offsetX:0, offsetY:0, scale:1, dragging:false, lastX:0,lastY:0 };
@@ -712,11 +788,10 @@
     });
     if (mode === 'frames') {
       rebuildFrameArray();
-      playOffset = currentTime * FPS * FRAME_STEP * timelineDensity;
     } else {
       rebuildClipArray();
-      playOffset = currentTime * getPixelsPerSecond() * timelineDensity;
     }
+    playOffset = currentTime * FPS * FRAME_STEP * timelineDensity;
     updateSpiralLength();
     updateScrubRange();
     updateTimecodeWithScrub();
@@ -727,9 +802,7 @@
 
   // ---------- CONVERSION HELPERS ----------
   function getCurrentTime() {
-    return timelineMode === 'frames'
-      ? playOffset / (FPS * FRAME_STEP * timelineDensity)
-      : playOffset / (getPixelsPerSecond() * timelineDensity);
+    return playOffset / (FPS * FRAME_STEP * timelineDensity);
   }
 
   function getTotalTime() {
@@ -779,9 +852,7 @@
   }
 
   function updateSpiralLength() {
-    const needed = (timelineMode === 'frames'
-      ? Math.ceil(getTotalFrames() * timelineDensity)
-      : getTotalFrames()) * FRAME_STEP + 2000;
+    const needed = Math.ceil(getTotalFrames() * timelineDensity) * FRAME_STEP + 2000;
     if (needed > totalSpiralLen) spiral = buildSpiral(needed);
   }
 
@@ -916,13 +987,7 @@
     markersDirty = true;
   }
 
-  // ---------- INITIALIZATION ----------
-  clipSequence.push({clipId:0, trimIn:0, trimOut:clips[0].duration-1});
-  clipSequence.push({clipId:1, trimIn:0, trimOut:clips[1].duration-1});
-  clipSequence.push({clipId:3, trimIn:0, trimOut:clips[3].duration-1});
-  clipSequence.push({clipId:4, trimIn:0, trimOut:clips[4].duration-1});
-  rebuildFrameArray();
-  updateHudFrames();
+  // ---------- INITIALIZATION (deferred to boot — see BOOT section) ----------
 
   // ---------- CONTROLS ----------
   const playBtn = document.getElementById('playBtn');
@@ -957,11 +1022,7 @@
 
   scrubSlider.addEventListener('input',()=>{
     const val = parseInt(scrubSlider.value, 10);
-    if (timelineMode === 'frames') {
-      playOffset = Math.floor(val * timelineDensity) * FRAME_STEP;
-    } else {
-      playOffset = (val / FPS) * getPixelsPerSecond() * timelineDensity;
-    }
+    playOffset = Math.floor(val * timelineDensity) * FRAME_STEP;
     updateTimecodeWithScrub();
     updatePreview();
     markersDirty = true;
@@ -1017,14 +1078,9 @@
 
   function updateTimecodeWithScrub() {
     updateTimecode();
-    if (timelineMode === 'frames') {
-      const visSlot = Math.max(0, Math.floor(playOffset / FRAME_STEP));
-      const originalFrame = Math.min(timelineFrames.length - 1, Math.floor(visSlot / timelineDensity));
-      scrubSlider.value = Math.min(originalFrame, scrubSlider.max);
-    } else {
-      const frameNum = Math.floor(playOffset / (getPixelsPerSecond() * timelineDensity) * FPS);
-      scrubSlider.value = Math.min(frameNum, scrubSlider.max);
-    }
+    const visSlot = Math.max(0, Math.floor(playOffset / FRAME_STEP));
+    const originalFrame = Math.min(getTotalFrames() - 1, Math.floor(visSlot / timelineDensity));
+    scrubSlider.value = Math.min(originalFrame, scrubSlider.max);
   }
 
   // ---------- HELPERS ----------
@@ -1068,11 +1124,8 @@
       frame = timelineFrames[idx];
       frameIdx = frame ? frame.frameIdx : 0;
     } else {
-      const pps = getPixelsPerSecond() * timelineDensity;
-      const time = playOffset / pps;
-      const frameNum = Math.floor(time * FPS);
-      const totalFrames = getTotalFrames();
-      const idx = Math.min(totalFrames - 1, Math.max(0, frameNum));
+      const visSlot = Math.max(0, Math.floor(playOffset / FRAME_STEP));
+      const idx = Math.min(getTotalFrames() - 1, Math.floor(visSlot / timelineDensity));
       let accum = 0;
       frame = null;
       for (const clip of timelineClips) {
@@ -1273,9 +1326,8 @@
       }
     }
 
-    const pps = timelineMode === 'frames' ? FPS * FRAME_STEP : getPixelsPerSecond();
     const totalFrames = getTotalFrames();
-    const totalDist = totalFrames * (timelineMode === 'frames' ? FRAME_STEP : pps / FPS);
+    const totalDist = totalFrames * FRAME_STEP;
     const isPlayheadMode = playbackMode === 'playhead';
 
     const canvasEl = timelineCanvas;
@@ -1291,7 +1343,7 @@
     const endDist = isPlayheadMode ? totalDist + coverage : playOffset + coverage;
 
     const markerIntervalFrames = getTimeMarkerInterval();
-    const step = (timelineMode === 'frames' ? FRAME_STEP : pps / FPS);
+    const step = FRAME_STEP;
     const startFrame = Math.ceil(startDist / step / markerIntervalFrames) * markerIntervalFrames;
     const endFrame = Math.min(totalFrames, Math.floor(endDist / step / markerIntervalFrames) * markerIntervalFrames);
 
@@ -1390,7 +1442,7 @@
         .closePath().fill(0xff3bff);
 
       // Time label on playhead
-      const timeSec = playOffset / (timelineMode === 'frames' ? FPS * FRAME_STEP * timelineDensity : getPixelsPerSecond() * timelineDensity);
+      const timeSec = playOffset / (FPS * FRAME_STEP * timelineDensity);
       const f = Math.floor((timeSec % 1) * FPS);
       const s = Math.floor(timeSec) % 60;
       const m = Math.floor(timeSec / 60);
@@ -1452,12 +1504,10 @@
 
     // Update playback
     if (isPlaying && getTotalFrames() > 0) {
-      const pps = timelineMode === 'frames' ? FPS * FRAME_STEP * timelineDensity : getPixelsPerSecond() * timelineDensity;
+      const pps = FPS * FRAME_STEP * timelineDensity;
       const advance = speed * pps * (ticker.deltaMS / 1000) * playheadSpeedMultiplier;
       const totalFrames = getTotalFrames();
-      const maxDist = timelineMode === 'frames'
-        ? Math.ceil(totalFrames * timelineDensity) * FRAME_STEP
-        : (totalFrames / FPS) * getPixelsPerSecond() * timelineDensity;
+      const maxDist = Math.ceil(totalFrames * timelineDensity) * FRAME_STEP;
 
       if (playbackMode === 'strip') {
         playOffset += advance;
@@ -1477,7 +1527,7 @@
         debugSampleTimer += ticker.deltaMS / 1000;
         if (debugSampleTimer >= DEBUG_SAMPLE_INTERVAL) {
           debugSampleTimer = 0;
-          const timeSec = playOffset / (timelineMode === 'frames' ? FPS * FRAME_STEP * timelineDensity : getPixelsPerSecond() * timelineDensity);
+          const timeSec = playOffset / (FPS * FRAME_STEP * timelineDensity);
           debugSamples.push({
             t: debugSamples.length * DEBUG_SAMPLE_INTERVAL,
             playOffset,
@@ -1551,37 +1601,141 @@
   new ResizeObserver(resizeAll).observe(timelineCanvas.parentElement);
   new ResizeObserver(resizeAll).observe(previewCanvas.parentElement);
 
+  // ---------- SAVE / LOAD PROJECT ----------
+  async function dataURLToCanvas(url) {
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      img.src = url;
+    });
+    const c = document.createElement('canvas');
+    c.width = img.width; c.height = img.height;
+    c.getContext('2d').drawImage(img, 0, 0);
+    return c;
+  }
+
+  async function saveProject() {
+    try {
+      const data = {
+        version: 1,
+        timeline: {
+          mode: timelineMode,
+          playbackMode,
+          playheadDirection,
+          density: timelineDensity,
+          speedMultiplier: playheadSpeedMultiplier,
+          playOffset,
+        },
+        clips: clips.map(c => {
+          const frames = [];
+          for (const t of c.thumbs) {
+            try { frames.push(t.toDataURL()); } catch (e) { frames.push(null); }
+          }
+          return { name: c.name, frames };
+        }),
+        sequence: clipSequence.map(s => ({ clipId: s.clipId })),
+      };
+      if (window.showSaveFilePicker) {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: 'project.spiral',
+          types: [{ description: 'Spiral Project', accept: { 'application/json': ['.spiral'] } }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(JSON.stringify(data));
+        await writable.close();
+      } else {
+        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'project.spiral';
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError' && err.name !== 'SecurityError') throw err;
+    }
+  }
+
+  async function loadProject() {
+    try {
+      let data;
+      if (window.showOpenFilePicker) {
+        const [handle] = await window.showOpenFilePicker({
+          types: [{ description: 'Spiral Project', accept: { 'application/json': ['.spiral'] } }],
+        });
+        const file = await handle.getFile();
+        data = JSON.parse(await file.text());
+      } else {
+        return; // fallback not implemented for non-FileSystemAPI
+      }
+      // Rebuild clips from saved frame data
+      const loaded = [];
+      for (const c of data.clips) {
+        const thumbs = await Promise.all(c.frames.map(dataURLToCanvas));
+        loaded.push({ name: c.name, id: loaded.length, duration: thumbs.length, thumbs });
+      }
+      clips = loaded;
+      clipSequence.length = 0;
+      data.sequence.forEach(s => {
+        clipSequence.push({ clipId: s.clipId, trimIn: 0, trimOut: clips[s.clipId].duration - 1 });
+      });
+      // Restore timeline state
+      const t = data.timeline;
+      timelineMode = t.mode; playbackMode = t.playbackMode; playheadDirection = t.playheadDirection;
+      timelineDensity = t.density; playheadSpeedMultiplier = t.speedMultiplier; playOffset = t.playOffset;
+      // Rebuild everything
+      rebuildFrameArray(); rebuildClipArray();
+      buildClipListUI();
+      updateScrubRange(); updateTimecodeWithScrub(); updatePreview();
+      updateSpiralLength(); rebuildScene(); markersDirty = true;
+      document.getElementById('hudFrames').textContent =
+        timelineMode === 'frames' ? `${timelineFrames.length} frames` : `${timelineClips.length} clips`;
+      updateHudFrames();
+    } catch (err) {
+      if (err.name !== 'AbortError' && err.name !== 'SecurityError') throw err;
+    }
+  }
+
+  document.getElementById('saveBtn').addEventListener('click', saveProject);
+  document.getElementById('loadBtn').addEventListener('click', loadProject);
+
   // ---------- BOOT ----------
   setTimeout(async () => {
     try {
-      resizeAll();
+      // Step 1: Load video clips (from IndexedDB cache or extract frames)
+      document.getElementById('hudFps').textContent = 'Loading clips...';
+      clips = await loadVideoClips();
+      buildClipListUI();
 
-      // Check PixiJS loaded
+      // Step 2: Initialize default clip sequence (first 3 clips)
+      clipSequence.length = 0;
+      clipSequence.push({clipId:0, trimIn:0, trimOut:clips[0].duration-1});
+      clipSequence.push({clipId:1, trimIn:0, trimOut:clips[1].duration-1});
+      clipSequence.push({clipId:2, trimIn:0, trimOut:clips[2].duration-1});
+      rebuildFrameArray();
+      updateHudFrames();
+
+      // Step 3: Resize and init PixiJS
+      resizeAll();
       if (typeof PIXI === 'undefined') {
         document.getElementById('hudFps').textContent = 'PixiJS failed to load';
         return;
       }
-
-      // Initialize PixiJS
       sg = await initPixiApp();
       appReady = true;
-
-      // Build scene (spiral path + items + markers)
       rebuildScene();
-
-      // Start ticker
       app.ticker.add(tickerCallback);
 
       updateTimecodeWithScrub();
       updatePreview();
-
       document.getElementById('hudZoom').textContent = '100%';
       document.getElementById('hudFrames').textContent = `${timelineFrames.length} frames`;
       lastFpsTime = performance.now();
       lastZoomScale = view.scale;
     } catch (err) {
-      document.getElementById('hudFps').textContent = 'PixiJS init error';
-      console.error('PixiJS init error:', err);
+      document.getElementById('hudFps').textContent = 'Boot error: ' + err.message;
+      console.error('Boot error:', err);
     }
   }, 50);
 
