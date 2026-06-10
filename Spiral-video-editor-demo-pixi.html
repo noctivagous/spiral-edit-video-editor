@@ -645,24 +645,45 @@
       video.muted = true;
       video.playsInline = true;
       video.src = videoSrc;
-      video.onloadedmetadata = async () => {
-        const totalFrames = Math.ceil(video.duration * fps);
-        const frames = [];
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        for (let i = 0; i < totalFrames; i++) {
-          video.currentTime = i / fps;
-          await new Promise(r => { video.onseeked = r; });
-          ctx.drawImage(video, 0, 0, w, h);
+      const capCvs = document.createElement('canvas');
+      capCvs.width = w; capCvs.height = h;
+      const capCtx = capCvs.getContext('2d');
+      const frames = {};
+      let lastCap = -1;
+      const total = fps * 3; // 3 second videos
+      let raf = null;
+      function loop() {
+        const cur = Math.floor(video.currentTime * fps);
+        if (cur > lastCap && cur < total && !frames[cur]) {
+          capCtx.drawImage(video, 0, 0, w, h);
           const fc = document.createElement('canvas');
           fc.width = w; fc.height = h;
-          fc.getContext('2d').drawImage(canvas, 0, 0);
-          frames.push(fc);
+          fc.getContext('2d').drawImage(capCvs, 0, 0);
+          frames[cur] = fc;
+          lastCap = cur;
         }
-        video.remove();
-        resolve(frames);
+        if (video.ended || cur >= total - 1) {
+          cancelAnimationFrame(raf);
+          video.pause(); video.remove();
+          // Fill gaps with nearest captured frame, then flatten to array
+          const out = [];
+          let prev = frames[0];
+          for (let i = 0; i < total; i++) {
+            if (frames[i]) prev = frames[i];
+            else if (!prev) continue;
+            const fc = document.createElement('canvas');
+            fc.width = w; fc.height = h;
+            fc.getContext('2d').drawImage(prev, 0, 0);
+            out.push(fc);
+          }
+          console.log(`📽 captured ${Object.keys(frames).length}/${total} frames`);
+          resolve(out);
+        } else {
+          raf = requestAnimationFrame(loop);
+        }
+      }
+      video.onloadedmetadata = () => {
+        video.play().then(() => { raf = requestAnimationFrame(loop); }).catch(reject);
       };
       video.onerror = () => reject(new Error('Failed to load ' + videoSrc));
       video.load();
@@ -672,10 +693,11 @@
   // ---------- INDEXED DB CACHE ----------
   function openClipDB() {
     return new Promise((resolve, reject) => {
-      const req = indexedDB.open('SpiralCut', 1);
+      const req = indexedDB.open('SpiralCut', 4);
       req.onupgradeneeded = () => {
-        if (!req.result.objectStoreNames.contains('clipFrames'))
-          req.result.createObjectStore('clipFrames', { keyPath: 'id' });
+        if (req.result.objectStoreNames.contains('clipFrames'))
+          req.result.deleteObjectStore('clipFrames');
+        req.result.createObjectStore('clipFrames', { keyPath: 'id' });
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -1894,6 +1916,30 @@
         })),
       })),
     } : null,
+    checkFrames: (clipIdx) => {
+      const c = clips && clips[clipIdx];
+      if (!c || !c.thumbs || c.thumbs.length < 2) return { error: 'no data', len: c?.thumbs?.length };
+      const t0 = c.thumbs[0], t1 = c.thumbs[c.thumbs.length - 1], tMid = c.thumbs[Math.floor(c.thumbs.length / 2)];
+      const ctx0 = t0.getContext('2d'), ctx1 = t1.getContext('2d'), ctxMid = tMid.getContext('2d');
+      const d0 = ctx0.getImageData(50, 50, 1, 1).data;
+      const d1 = ctx1.getImageData(50, 50, 1, 1).data;
+      const dMid = ctxMid.getImageData(50, 50, 1, 1).data;
+      let totalSame = 0, total = 250;
+      for (let i = 0; i < total; i++) {
+        const px0 = ctx0.getImageData((i*4)%160, Math.floor(i/40), 1, 1).data;
+        const px1 = ctx1.getImageData((i*4)%160, Math.floor(i/40), 1, 1).data;
+        if (px0[0]===px1[0] && px0[1]===px1[1] && px0[2]===px1[2]) totalSame++;
+      }
+      return {
+        clipName: c.name,
+        numThumbs: c.thumbs.length,
+        centerPixel0: Array.from(d0),
+        centerPixelMid: Array.from(dMid),
+        centerPixelLast: Array.from(d1),
+        samePx: totalSame,
+        totalPx: total,
+      };
+    },
   };
 })();
 </script>
