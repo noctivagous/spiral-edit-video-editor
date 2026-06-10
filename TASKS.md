@@ -49,3 +49,12 @@ FUTURE:
 - drag clip to timeline
 
 
+[ ] the issue is that the length slider should be changed.  the point of it is
+that if the timeline mode is selected, 15 frames might be shown if there are 30
+if the setting is set to .5x, then if it is set to 2x it will repeat frames.  in
+the clip mode it will shorten the clip rects if it is <1 and lengthen them if it
+is >1.  it might need a new name.  what it does currently in effect is alter the
+distance between frames or clip rects, but the distance between frames should be
+a constant in the code and set to 1pt until we decide to make it an exposed
+parameter.
+
