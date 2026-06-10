@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Spiral Cut — Rectangular Spiral Timeline Editor (PixiJS v8)</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo">
+      <div class="logo-badge"></div>
+      <div>SPIRAL CUT</div>
+    </div>
+    <div class="header-center">
+      <div class="mode-group">
+        <span class="mode-label">TIMELINE</span>
+        <div class="mode-toggle" title="Timeline">
+          <button class="mode-btn active" data-mode="frames" title="Frame Mode">FRAMES</button>
+          <button class="mode-btn" data-mode="clips" title="Clip Mode">CLIPS</button>
+        </div>
+      </div>
+      <div class="mode-group">
+        <span class="mode-label">PLAYBACK</span>
+        <div class="mode-toggle" title="Playback">
+          <button class="mode-btn" data-playback="strip" title="Strip Mode (frames move)">STRIP</button>
+          <button class="mode-btn active" data-playback="playhead" title="Playhead Mode (playhead moves)">PLAYHEAD</button>
+        </div>
+      </div>
+      <div class="mode-group" style="margin-left:8px">
+        <span class="mode-label">DENSITY</span>
+        <input type="range" id="densitySlider" min="0.25" max="2.0" step="0.05" value="1.0" style="width:100px;cursor:pointer" title="Timeline density: frame stride in frames mode, clip rect scale in clips mode">
+        <span id="densityValue" style="font-size:10px;color:var(--text-dim);margin-left:6px;font-variant-numeric:tabular-nums">1.00×</span>
+      </div>
+      <div class="mode-group" style="margin-left:8px">
+        <span class="mode-label">SPEED</span>
+        <input type="range" id="speedMultSlider" min="0.25" max="3.0" step="0.05" value="1.0" style="width:100px;cursor:pointer" title="Playhead speed multiplier">
+        <span id="speedMultValue" style="font-size:10px;color:var(--text-dim);margin-left:6px;font-variant-numeric:tabular-nums">1.00×</span>
+      </div>
+      <div class="zoom-line-indicator" id="zoomLineIndicator">
+        <span>ZOOM LINE ACTIVE</span>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <div class="pill">60 FPS • PixiJS v8 GPU</div>
+  </header>
+  <main>
+    <aside class="panel left">
+      <h2>▸ Clip Library</h2>
+      <div class="panel-body">
+        <div class="clip-list" id="clipList"></div>
+      </div>
+    </aside>
+    <section class="center">
+      <div class="timeline-wrap">
+        <canvas id="timeline"></canvas>
+        <div class="hud">
+          <div class="chip" id="hudFps">0 FPS</div>
+          <div class="chip" id="hudFrames">0 frames</div>
+          <div class="chip" id="hudZoom">100%</div>
+        </div>
+      </div>
+      <div class="controls">
+        <div class="controls-group">
+          <button class="icon-btn primary" id="playBtn" title="Play/Pause">▶</button>
+          <button class="icon-btn" id="stopBtn" title="Stop">■</button>
+          <span style="width:1px;height:24px;background:var(--border);margin:0 4px"></span>
+          <button class="icon-btn" id="saveBtn" title="Save Project" style="font-size:16px">💾</button>
+          <button class="icon-btn" id="loadBtn" title="Load Project" style="font-size:16px">📂</button>
+        </div>
+        <div class="controls-group">
+          <label style="font-size:12px;color:var(--text-dim)">Speed</label>
+          <select id="speedSel">
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="1.5">1.5×</option>
+            <option value="2">2×</option>
+          </select>
+        </div>
+        <div class="controls-group">
+          <label style="font-size:12px;color:var(--text-dim)">Zoom</label>
+          <input class="slider" type="range" id="zoomSlider" min="0.3" max="2.5" step="0.01" value="1">
+        </div>
+        <div class="controls-group">
+          <button class="icon-btn" id="zoomInBtn" title="Zoom In">+</button>
+          <button class="icon-btn" id="zoomOutBtn" title="Zoom Out">−</button>
+          <button class="icon-btn" id="resetBtn" title="Reset View">◎</button>
+        </div>
+        <div class="controls-group" id="playheadDirGroup" style="display:none">
+          <label style="font-size:12px;color:var(--text-dim)">Direction</label>
+          <div class="mode-toggle">
+            <button class="mode-btn active" data-direction="outward" title="Center to End">OUT</button>
+            <button class="mode-btn" data-direction="inward" title="End to Center">IN</button>
+          </div>
+        </div>
+        <div class="controls-group" style="flex:1;max-width:300px">
+          <input type="range" id="scrubSlider" min="0" max="100" value="0" style="width:100%;cursor:pointer" title="Scrub timeline">
+        </div>
+        <div class="controls-group">
+          <span id="timecode" style="font-variant-numeric:tabular-nums;font-weight:600">00:00 / 00:00</span>
+        </div>
+      </div>
+    </section>
+    <aside class="panel right">
+      <h2>◉ Preview • Playhead</h2>
+      <div class="panel-body">
+        <div class="preview-wrap">
+          <canvas id="preview"></canvas>
+          <div class="preview-overlay"></div>
+        </div>
+        <div class="meta-grid">
+          <div class="meta-card">
+            <div class="meta-label">Current Clip</div>
+            <div class="meta-value" id="metaClip">—</div>
+          </div>
+          <div class="meta-card">
+            <div class="meta-label">Frame</div>
+            <div class="meta-value" id="metaFrame">0</div>
+          </div>
+        <div class="legend">
+          <strong>How it works:</strong><br>
+          Timeline is a rectangular spiral. Clips flow inward toward the center playhead.<br>
+          Drag to pan • Wheel / pinch to zoom • Drop clips from left to add.
+        </div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>

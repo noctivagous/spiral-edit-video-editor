@@ -260,3 +260,27 @@ After Phase 2 is stable (on-demand seeking proven). The old v1 format (embedded 
 | 3 — Export with concat | 1 | Medium | Downloadable timeline as video |
 | 4 — Project format v2 | 2 | Small | Tiny project files, source-referenced |
 | 3.5 — Audio in export | 3 | Small | Audio tracks in exported video |
+
+---
+
+EXTRA tasks
+
+1. video frames shouldn't be upset down on the top edge segments of the spiral.
+on the right edge segments, they should be rotated 180 degrees from what they are.
+2. use layout debug utilities we made to make the segments of the spiral
+line up instead of overflow or overlap.  We are usually a rectangular
+spiral, so this should provide flexibility.
+3. debug dropdown menu at top and one of the list items says, "reset loading"
+4. seeking/playback preview box (current), scrubbing preview box.
+two preview boxes.  the first is the existing one which is where the
+playhead is located (seeking/playback).  a new one underneath it is for hover-based scrubbing
+and shows in the preview box the frame where the mouse is hovering and if the mouse 
+leaves any hover space over a clip this scrubbing preview box turns empty.  
+both preview boxes should gain a timecode box, with a monospace font.  so, when 
+hover-based scrubbing the timecode box will turn empty if the mouse leaves
+a clip area.
+5. clip selection. the clip selection highlights the entire collective shape of the clips, including
+how many segments it includes
+	d / left mouse click - seek to point underneath mouse
+	f - select clip underneath mouse
+

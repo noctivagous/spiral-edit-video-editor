@@ -1,0 +1,78 @@
+SPLIT PLAN — js/app.js → ES modules
+
+All modules export their public API and import dependencies. Served via
+dev server (Live Server, http-server, etc.) since ES modules require HTTP.
+
+MODULE                          EXPORTS                             IMPORTS
+──────────────────────────────────────────────────────────────────────────────
+config.js                       TRACK_SPACING, FRAME_W, FRAME_H,   (none)
+                                FRAME_STEP, FPS, dirs, clipDefs,
+                                BASE_PPS, getPixelsPerSecond,
+                                DEBUG_SAMPLE_INTERVAL
+
+state.js                        timelineMode, playbackMode,         config
+                                playheadDirection, timelineDensity,
+                                playheadSpeedMultiplier, view,
+                                isPlaying, playOffset, speed,
+                                markersDirty, timelineFrames,
+                                timelineClips, clipSequence, clips
+
+spiral.js                       buildSpiral, spiral,               config, state
+                                totalSpiralLen, pointAtDistance
+
+mediabunny.js                   getMediabunny, getFrameThumb,      config, state
+                                getFirstFrame, frameCache
+
+clip-loader.js                  loadVideoClips, buildClipListEntry  config, state,
+                                initTimelineSequence                mediabunny, scene-graph
+
+timeline-state.js               rebuildFrameArray,                 config, state,
+                                rebuildClipArray,                  spiral, scene-graph
+                                updateSpiralLength,
+                                updateScrubRange, updateHudFrames,
+                                addClipToTimeline, getCurrentTime,
+                                getTotalTime, getTotalFrames,
+                                updateTimecodeWithScrub,
+                                updateTimecode, formatTC, formatTime
+
+pixi-setup.js                   initPixiApp, resizePixiApp, sg     config, state
+
+scene-graph.js                  rebuildScene, rebuildSpiralPath,   config, state,
+                                rebuildItems, addFrameSprite,       spiral, pixi-setup,
+                                rebuildMarkers, markerTextPool,     thumbnails, timeline-state
+                                getThumbInterval,
+                                getTimeMarkerInterval,
+                                formatTimeLabel
+
+thumbnails.js                   loadSpiralThumbnails                config, state,
+                                                                    spiral, mediabunny
+
+playhead.js                     updatePlayheadGraphics,             config, state,
+                                updateZoomLineGraphics,              spiral, pixi-setup
+                                zoomLineLabel
+
+preview.js                      updatePreview, _pendingPreview      config, state,
+                                                                    mediabunny, timeline-state
+
+controls.js                     (binds all event listeners)         config, state,
+                                                                    timeline-state, preview,
+                                                                    scene-graph, playhead,
+                                                                    thumbnails
+
+render-loop.js                  tickerCallback, ticker (attached)   config, state, spiral,
+                                                                    scene-graph, thumbnails,
+                                                                    playhead, preview,
+                                                                    pixi-setup
+
+save-load.js                    saveProject, loadProject            config, state,
+                                                                    clip-loader, timeline-state,
+                                                                    scene-graph, preview
+
+boot.js                         (setTimeout init)                   pixi-setup, scene-graph,
+                                                                    clip-loader, render-loop,
+                                                                    save-load
+
+debug.js                        window.debugSpiral = {...}           spiral, state, pixi-setup,
+                                                                    scene-graph, mediabunny
+
+main.js                         imports all modules, calls boot    (all above)
