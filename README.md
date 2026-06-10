@@ -5,6 +5,12 @@ editor where the timeline is arranged in the form
 of a rectangular spiral instead of a horizontal track. 
 The playhead moves around the spiral starting
 from the center, which is the beginning of the timeline.
+The user makes use of the space through zooming in
+and out (with the scrollwheel or pressing the
+z key to activate a zoom line).
+
+
+![Alt text](img/readme-screenshot.png)
 
 Because of the expanded view provided for browsing 
 the video sequence, two timelines are provided: 
