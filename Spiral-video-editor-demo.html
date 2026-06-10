@@ -81,6 +81,19 @@
     color:var(--accent);
     box-shadow:0 0 0 1px rgba(0,245,255,.3);
   }
+  .mode-group{
+    display:flex;
+    align-items:center;
+    gap:6px;
+  }
+  .mode-label{
+    font-size:10px;
+    font-weight:700;
+    color:var(--text-dim);
+    text-transform:uppercase;
+    letter-spacing:.1em;
+    white-space:nowrap;
+  }
   .zoom-line-indicator{
     display:none;
     align-items:center;
@@ -221,7 +234,6 @@
     cursor:grab;
   }
   #timeline.grabbing{cursor:grabbing}
-  #timeline.zoom-line{cursor:crosshair}
   .hud{
     position:absolute;
     top:12px;left:12px;
@@ -325,9 +337,29 @@
       <div>SPIRAL CUT</div>
     </div>
     <div class="header-center">
-      <div class="mode-toggle">
-        <button class="mode-btn active" data-mode="frames" title="Frame Mode">FRAMES</button>
-        <button class="mode-btn" data-mode="clips" title="Clip Mode">CLIPS</button>
+      <div class="mode-group">
+        <span class="mode-label">TIMELINE</span>
+        <div class="mode-toggle" title="Timeline">
+          <button class="mode-btn active" data-mode="frames" title="Frame Mode">FRAMES</button>
+          <button class="mode-btn" data-mode="clips" title="Clip Mode">CLIPS</button>
+        </div>
+      </div>
+      <div class="mode-group">
+        <span class="mode-label">PLAYBACK</span>
+        <div class="mode-toggle" title="Playback">
+          <button class="mode-btn" data-playback="strip" title="Strip Mode (frames move)">STRIP</button>
+          <button class="mode-btn active" data-playback="playhead" title="Playhead Mode (playhead moves)">PLAYHEAD</button>
+        </div>
+      </div>
+      <div class="mode-group" style="margin-left:8px">
+        <span class="mode-label">LENGTH</span>
+        <input type="range" id="lengthSlider" min="0.25" max="2.0" step="0.05" value="1.0" style="width:100px;cursor:pointer" title="Timeline clip width">
+        <span id="lengthValue" style="font-size:10px;color:var(--text-dim);margin-left:6px;font-variant-numeric:tabular-nums">1.00×</span>
+      </div>
+      <div class="mode-group" style="margin-left:8px">
+        <span class="mode-label">SPEED</span>
+        <input type="range" id="speedMultSlider" min="0.25" max="3.0" step="0.05" value="1.0" style="width:100px;cursor:pointer" title="Playhead speed multiplier">
+        <span id="speedMultValue" style="font-size:10px;color:var(--text-dim);margin-left:6px;font-variant-numeric:tabular-nums">1.00×</span>
       </div>
       <div class="zoom-line-indicator" id="zoomLineIndicator">
         <span>ZOOM LINE ACTIVE</span>
@@ -378,6 +410,13 @@
           <button class="icon-btn" id="zoomOutBtn" title="Zoom Out">−</button>
           <button class="icon-btn" id="resetBtn" title="Reset View">◎</button>
         </div>
+        <div class="controls-group" id="playheadDirGroup" style="display:none">
+          <label style="font-size:12px;color:var(--text-dim)">Direction</label>
+          <div class="mode-toggle">
+            <button class="mode-btn active" data-direction="outward" title="Center to End">OUT</button>
+            <button class="mode-btn" data-direction="inward" title="End to Center">IN</button>
+          </div>
+        </div>
         <div class="controls-group" style="flex:1;max-width:300px">
           <input type="range" id="scrubSlider" min="0" max="100" value="0" style="width:100%;cursor:pointer" title="Scrub timeline">
         </div>
@@ -426,6 +465,13 @@
 
   // ---------- TIMELINE MODE ----------
   let timelineMode = 'frames'; // 'frames' | 'clips'
+
+  // ---------- PLAYBACK MODE ----------
+  let playbackMode = 'playhead'; // 'strip' | 'playhead'
+  let playheadDirection = 'outward'; // 'outward' | 'inward'
+  let timelineLengthMultiplier = 1.0; // 0.25 - 2.0, scales clip width visually
+  let playheadSpeedMultiplier = 1.0; // 0.25 - 3.0, scales playhead movement speed
+
   const BASE_PPS = 78; // base pixels per second at 1x zoom (same as FRAME_STEP)
   const getPixelsPerSecond = () => BASE_PPS * view.scale;
 
@@ -717,13 +763,11 @@
         zoomLineEnd = { ...zoomLineStart };
         document.getElementById('zoomLineIndicator').classList.add('active');
         timelineCanvas.classList.add('zoom-line');
-        timelineCanvas.style.cursor = 'crosshair';
       } else {
         zPressed = false;
         zoomLineActive = false;
         document.getElementById('zoomLineIndicator').classList.remove('active');
         timelineCanvas.classList.remove('zoom-line');
-        timelineCanvas.style.cursor = '';
       }
     }
   });
@@ -820,8 +864,49 @@
 
   // Mode toggle
   document.querySelectorAll('.mode-btn').forEach(btn => {
-    btn.addEventListener('click', () => setTimelineMode(btn.dataset.mode));
+    if (btn.dataset.mode) {
+      btn.addEventListener('click', () => setTimelineMode(btn.dataset.mode));
+    } else if (btn.dataset.playback) {
+      btn.addEventListener('click', () => setPlaybackMode(btn.dataset.playback));
+    } else if (btn.dataset.direction) {
+      btn.addEventListener('click', () => setPlayheadDirection(btn.dataset.direction));
+    }
   });
+
+  // Length slider
+  const lengthSlider = document.getElementById('lengthSlider');
+  const lengthValue = document.getElementById('lengthValue');
+  lengthSlider.addEventListener('input', () => {
+    timelineLengthMultiplier = parseFloat(lengthSlider.value);
+    lengthValue.textContent = timelineLengthMultiplier.toFixed(2) + '×';
+  });
+
+  // Speed multiplier slider
+  const speedMultSlider = document.getElementById('speedMultSlider');
+  const speedMultValue = document.getElementById('speedMultValue');
+  speedMultSlider.addEventListener('input', () => {
+    playheadSpeedMultiplier = parseFloat(speedMultSlider.value);
+    speedMultValue.textContent = playheadSpeedMultiplier.toFixed(2) + '×';
+  });
+
+  function setPlaybackMode(mode) {
+    if (mode === playbackMode) return;
+    playbackMode = mode;
+    document.querySelectorAll('[data-playback]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.playback === mode);
+    });
+    // Show/hide direction toggle
+    const dirGroup = document.getElementById('playheadDirGroup');
+    if (dirGroup) dirGroup.style.display = mode === 'playhead' ? 'flex' : 'none';
+  }
+
+  function setPlayheadDirection(dir) {
+    if (dir === playheadDirection) return;
+    playheadDirection = dir;
+    document.querySelectorAll('[data-direction]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.direction === dir);
+    });
+  }
 
   // Update scrub slider during playback
   function updateTimecodeWithScrub() {
@@ -964,6 +1049,99 @@
   // Expose zoom line state for debugging
   window.debugSpiral.getZoomLineState = () => ({ zoomLineActive, zoomLineStart, zoomLineEnd, zoomLineBaseScale });
 
+  // ---------- TIME MARKERS ----------
+  function getTimeMarkerInterval() {
+    const s = view.scale;
+    if (s < 0.5) return FPS * 5;      // 1 marker per 5 seconds
+    if (s < 1.0) return FPS;          // 1 marker per second
+    if (s < 1.5) return FPS / 2;      // 1 marker per 0.5 seconds
+    if (s < 2.0) return FPS / 5;      // 1 marker per 0.2 seconds
+    return 1;                          // 1 marker per frame
+  }
+
+  function formatTimeLabel(frames) {
+    const sec = Math.floor(frames / FPS);
+    const f = frames % FPS;
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    if (m > 0) return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(f).padStart(2,'0')}`;
+    return `${String(s).padStart(2,'0')}.${String(f).padStart(2,'0')}`;
+  }
+
+  function drawTimeMarkers(tctx, w, h, view) {
+    const pps = timelineMode === 'frames' ? FPS * FRAME_STEP : getPixelsPerSecond();
+    const totalFrames = getTotalFrames();
+    const effectiveFrameStep = FRAME_STEP * timelineLengthMultiplier;
+    const totalDist = totalFrames * (timelineMode === 'frames' ? effectiveFrameStep : pps / FPS);
+    const isPlayheadMode = playbackMode === 'playhead';
+    
+    // Determine visible distance range
+    const halfW = w / 2 / view.scale;
+    const halfH = h / 2 / view.scale;
+    const maxVisibleDist = Math.sqrt(halfW * halfW + halfH * halfH);
+    const offsetDist = Math.sqrt(view.offsetX * view.offsetX + view.offsetY * view.offsetY) / view.scale;
+    const effectiveMaxDist = maxVisibleDist + offsetDist + 500;
+    
+    // In playhead mode, show all markers along full timeline
+    const startDist = isPlayheadMode ? 0 : Math.max(0, playOffset - effectiveMaxDist);
+    const endDist = isPlayheadMode ? totalDist : Math.min(totalDist, playOffset + effectiveMaxDist);
+    
+    // Adaptive marker interval
+    const markerIntervalFrames = getTimeMarkerInterval();
+    const markerIntervalDist = markerIntervalFrames * (timelineMode === 'frames' ? effectiveFrameStep : pps / FPS);
+    
+    // Start from nearest interval boundary
+    const startFrame = Math.ceil(startDist / (timelineMode === 'frames' ? effectiveFrameStep : pps / FPS) / markerIntervalFrames) * markerIntervalFrames;
+    const endFrame = Math.min(totalFrames, Math.floor(endDist / (timelineMode === 'frames' ? effectiveFrameStep : pps / FPS) / markerIntervalFrames) * markerIntervalFrames);
+    
+    tctx.save();
+    tctx.strokeStyle = 'rgba(0,245,255,.4)';
+    tctx.lineWidth = 1 / view.scale;
+    tctx.fillStyle = 'rgba(0,245,255,.8)';
+    tctx.font = `${Math.max(8, 10 / view.scale)}px monospace`;
+    tctx.textAlign = 'left';
+    tctx.textBaseline = 'middle';
+    
+    for (let frame = startFrame; frame <= endFrame; frame += markerIntervalFrames) {
+      const dist = frame * (timelineMode === 'frames' ? effectiveFrameStep : pps / FPS);
+      const displayDist = isPlayheadMode ? dist : dist - playOffset;
+      
+      if (isPlayheadMode && displayDist < -500) continue;
+      if (!isPlayheadMode && (displayDist < -effectiveMaxDist || displayDist > effectiveMaxDist)) continue;
+      
+      const {x, y, ang} = pointAtDistance(displayDist);
+      
+      // Screen bounds culling
+      const screenX = w/2 + view.offsetX + x * view.scale;
+      const screenY = h/2 + view.offsetY + y * view.scale;
+      if (screenX < -50 || screenX > w + 50 || screenY < -50 || screenY > h + 50) continue;
+      
+      // Draw perpendicular tick mark
+      const tickLength = 15 / view.scale;
+      const tickWidth = 1.5 / view.scale;
+      const perpAng = ang + Math.PI / 2;
+      
+      const tx1 = x + Math.cos(perpAng) * tickLength;
+      const ty1 = y + Math.sin(perpAng) * tickLength;
+      const tx2 = x - Math.cos(perpAng) * tickLength;
+      const ty2 = y - Math.sin(perpAng) * tickWidth;
+      
+      tctx.beginPath();
+      tctx.moveTo(tx1, ty1);
+      tctx.lineTo(tx2, ty2);
+      tctx.stroke();
+      
+      // Draw time label
+      const labelX = tx1 + Math.cos(perpAng) * 4 / view.scale;
+      const labelY = ty1 + Math.sin(perpAng) * 4 / view.scale;
+      
+      const label = formatTimeLabel(frame);
+      tctx.fillText(label, labelX, labelY);
+    }
+    
+    tctx.restore();
+  }
+
   function getThumbInterval() {
     const s = view.scale;
     if (s < 0.5) return 9999; // 1 per clip
@@ -973,38 +1151,62 @@
   }
 
   function drawClipMode(tctx, w, h) {
-    const pps = getPixelsPerSecond();
+    const effectiveFrameStep = FRAME_STEP * timelineLengthMultiplier;
+    const pps = getPixelsPerSecond() * timelineLengthMultiplier;
     const thumbInterval = getThumbInterval();
 
     timelineClips.forEach(clip => {
-      const clipStartPx = clip.startFrame / FPS * pps;
-      const clipEndPx = (clip.startFrame + clip.duration) / FPS * pps;
-
-      // Skip if clip not visible
-      if (clipEndPx - playOffset < -500 || clipStartPx - playOffset > 500) return;
-
       const clipData = clips[clip.clipId];
-
-      // Draw clip block
-      const blockStart = pointAtDistance(clipStartPx - playOffset);
-      const blockEnd = pointAtDistance(clipEndPx - playOffset);
-
-      tctx.save();
-      tctx.fillStyle = clipData.c1 || 'rgba(0,245,255,0.3)';
-      tctx.fillRect(blockStart.x, blockStart.y, blockEnd.x - blockStart.x, FRAME_H);
-
-      // Draw adaptive thumbnails
-      for (let f = clip.trimIn; f <= clip.trimOut; f += thumbInterval) {
-        const frameTime = (clip.startFrame + (f - clip.trimIn)) / FPS;
-        const dist = frameTime * pps - playOffset;
-        const {x, y, ang} = pointAtDistance(dist);
+      const clipFrameCount = clip.duration;
+      
+      // Draw each frame of the clip along the spiral (like frames mode but grouped)
+      for (let f = clip.trimIn; f <= clip.trimOut; f++) {
+        const frameIndex = clip.startFrame + (f - clip.trimIn);
+        const dist = frameIndex * effectiveFrameStep;
+        const displayDist = dist - playOffset;
+        
+        // Culling
+        const halfW = w / 2 / view.scale;
+        const halfH = h / 2 / view.scale;
+        const maxVisibleDist = Math.sqrt(halfW * halfW + halfH * halfH);
+        const offsetDist = Math.sqrt(view.offsetX * view.offsetX + view.offsetY * view.offsetY) / view.scale;
+        const effectiveMaxDist = maxVisibleDist + offsetDist + effectiveFrameStep * 10;
+        
+        if (displayDist < -effectiveMaxDist || displayDist > effectiveMaxDist) continue;
+        
+        const {x, y, ang} = pointAtDistance(displayDist);
+        const screenX = w/2 + view.offsetX + x * view.scale;
+        const screenY = h/2 + view.offsetY + y * view.scale;
+        if (screenX < -FRAME_W || screenX > w + FRAME_W || screenY < -FRAME_H || screenY > h + FRAME_H) continue;
+        
+        // Only draw thumbnails at intervals for performance
+        const shouldDrawThumb = (f - clip.trimIn) % thumbInterval === 0;
+        
         tctx.save();
         tctx.translate(x, y);
         tctx.rotate(ang);
-        tctx.drawImage(clipData.thumbs[f], -FRAME_W/2, -FRAME_H/2, FRAME_W, FRAME_H);
+        
+        // Clip background block (just for first frame or at intervals)
+        if (f === clip.trimIn || (f - clip.trimIn) % Math.max(1, clipFrameCount / 10) === 0) {
+          tctx.fillStyle = clipData.c1 || 'rgba(0,245,255,0.3)';
+          tctx.fillRect(-FRAME_W/2 - 2, -FRAME_H/2 - 2, FRAME_W + 4, FRAME_H + 4);
+        }
+        
+        if (shouldDrawThumb) {
+          tctx.drawImage(clipData.thumbs[f], -FRAME_W/2, -FRAME_H/2, FRAME_W, FRAME_H);
+          
+          // Clip name label on first frame
+          if (f === clip.trimIn) {
+            tctx.fillStyle = 'rgba(0,0,0,.7)';
+            tctx.fillRect(-FRAME_W/2, FRAME_H/2 - 14, 80, 14);
+            tctx.fillStyle = '#00f5ff';
+            tctx.font = '10px monospace';
+            tctx.fillText(clip.clipName.substring(0, 10), -FRAME_W/2 + 2, FRAME_H/2 - 4);
+          }
+        }
+        
         tctx.restore();
       }
-      tctx.restore();
     });
   }
 
@@ -1014,15 +1216,34 @@
 
     // update play
     if(isPlaying && getTotalFrames() > 0){
-      const pps = timelineMode === 'frames' ? FPS * FRAME_STEP : getPixelsPerSecond();
-      const advance = speed * pps * dt;
-      playOffset += advance;
+      const effectiveFrameStep = FRAME_STEP * timelineLengthMultiplier;
+      const pps = timelineMode === 'frames' ? FPS * effectiveFrameStep : getPixelsPerSecond();
+      // playheadSpeedMultiplier controls playhead movement speed
+      const advance = speed * pps * dt * playheadSpeedMultiplier;
       const totalFrames = getTotalFrames();
       const maxDist = timelineMode === 'frames'
-        ? totalFrames * FRAME_STEP
-        : (totalFrames / FPS) * getPixelsPerSecond();
-      if(playOffset >= maxDist){
-        playOffset = 0;
+        ? totalFrames * FRAME_STEP * timelineLengthMultiplier
+        : (totalFrames / FPS) * getPixelsPerSecond() * timelineLengthMultiplier;
+
+      if (playbackMode === 'strip') {
+        // Current: frames move, playhead stationary
+        playOffset += advance;
+        if(playOffset >= maxDist) playOffset = 0;
+      } else {
+        // Playhead mode: frames stationary, playhead moves
+        if (playheadDirection === 'outward') {
+          playOffset += advance;
+          if(playOffset >= maxDist) {
+            playOffset = 0;
+            // Could reverse direction here for ping-pong
+          }
+        } else {
+          playOffset -= advance;
+          if(playOffset <= 0) {
+            playOffset = maxDist;
+            // Could reverse direction here
+          }
+        }
       }
       updateTimecodeWithScrub();
       updatePreview();
@@ -1058,19 +1279,28 @@
       const offsetDist = Math.sqrt(view.offsetX * view.offsetX + view.offsetY * view.offsetY) / view.scale;
       const effectiveMaxDist = maxVisibleDist + offsetDist + FRAME_STEP * 10;
 
-      const startDist = Math.max(0, playOffset - effectiveMaxDist);
-      const endDist = playOffset + effectiveMaxDist;
-      const timelineEndDist = timelineFrames.length * FRAME_STEP;
-      const startIdx = Math.max(0, Math.floor(startDist / FRAME_STEP) - 2);
-      const endIdx = Math.min(timelineFrames.length - 1, Math.max(Math.ceil(endDist / FRAME_STEP) + 2, Math.ceil(timelineEndDist / FRAME_STEP)));
+      // Effective frame step for visual rendering (scaled by length multiplier)
+      const effectiveFrameStep = FRAME_STEP * timelineLengthMultiplier;
+      const fullTimelineDist = timelineFrames.length * effectiveFrameStep;
+      
+      // In playhead mode, show full timeline; in strip mode, show window around playhead
+      const isPlayheadMode = playbackMode === 'playhead';
+      const viewWindow = isPlayheadMode ? fullTimelineDist + 5000 : effectiveMaxDist;
+      
+      const startDist = isPlayheadMode ? 0 : Math.max(0, playOffset - effectiveMaxDist);
+      const endDist = isPlayheadMode ? fullTimelineDist : playOffset + effectiveMaxDist;
+      const startIdx = Math.max(0, Math.floor(startDist / effectiveFrameStep) - 2);
+      const endIdx = Math.min(timelineFrames.length - 1, Math.max(Math.ceil(endDist / effectiveFrameStep) + 2, Math.ceil(fullTimelineDist / effectiveFrameStep)));
 
       let renderedCount = 0;
       let culledCount = 0;
 
       for(let i=endIdx;i>=startIdx;i--){
-        const dist = i * FRAME_STEP;
-        const displayDist = dist - playOffset;
-        if(displayDist < -effectiveMaxDist) continue;
+        const dist = i * effectiveFrameStep;
+        const displayDist = isPlayheadMode ? dist : dist - playOffset;
+        // In playhead mode, cull only truly off-screen frames (not based on playOffset)
+        if (isPlayheadMode && displayDist < -500) continue;
+        if (!isPlayheadMode && displayDist < -effectiveMaxDist) continue;
         const {x,y,ang} = pointAtDistance(displayDist);
         const screenX = (w/2 + view.offsetX + x * view.scale);
         const screenY = (h/2 + view.offsetY + y * view.scale);
@@ -1104,7 +1334,7 @@
         mode: 'frames',
         maxVisibleDist,
         effectiveMaxDist,
-        timelineEndDist,
+        timelineEndDist: fullTimelineDist,
         startIdx,
         endIdx,
         renderedCount,
@@ -1124,6 +1354,9 @@
         playOffset
       };
     }
+
+    // Time markers on top of everything (still in spiral transform)
+    drawTimeMarkers(tctx, w, h, view);
 
     // Draw zoom line if active (in screen space, outside the spiral transform)
     tctx.restore();
@@ -1156,7 +1389,7 @@
       tctx.restore();
     }
 
-    // playhead at center (reapply spiral transform)
+    // playhead (position depends on playback mode)
     tctx.save();
     tctx.translate(w/2 + view.offsetX, h/2 + view.offsetY);
     tctx.scale(view.scale, view.scale);
@@ -1164,20 +1397,45 @@
     tctx.shadowBlur=25;
     tctx.strokeStyle='rgba(255,59,255,.9)';
     tctx.lineWidth=3;
-    tctx.beginPath();
-    tctx.arc(0,0,22,0,Math.PI*2);
-    tctx.stroke();
-    tctx.shadowBlur=0;
-    tctx.strokeStyle='rgba(255,59,255,.9)';
-    tctx.lineWidth=2;
-    tctx.beginPath();
-    tctx.moveTo(-30,0); tctx.lineTo(-10,0);
-    tctx.moveTo(10,0); tctx.lineTo(30,0);
-    tctx.moveTo(0,-30); tctx.lineTo(0,-10);
-    tctx.moveTo(0,10); tctx.lineTo(0,30);
-    tctx.stroke();
-    tctx.fillStyle='#ff3bff';
-    tctx.beginPath(); tctx.arc(0,0,4,0,Math.PI*2); tctx.fill();
+    
+    if (playbackMode === 'playhead') {
+      // Draw playhead at current playOffset position on spiral
+      const {x, y, ang} = pointAtDistance(playOffset);
+      tctx.translate(x, y);
+      tctx.rotate(ang);
+      // Playhead line perpendicular to spiral (like NLE playhead)
+      const lineLength = TRACK_SPACING * 0.9;
+      tctx.beginPath();
+      tctx.moveTo(0, -lineLength/2);
+      tctx.lineTo(0, lineLength/2);
+      tctx.stroke();
+      tctx.shadowBlur=0;
+      // Playhead head (small triangle at top)
+      tctx.fillStyle='#ff3bff';
+      tctx.beginPath();
+      tctx.moveTo(-6, -lineLength/2);
+      tctx.lineTo(6, -lineLength/2);
+      tctx.lineTo(0, -lineLength/2 - 8);
+      tctx.closePath();
+      tctx.fill();
+      // Time marker
+      tctx.fillStyle='rgba(255,59,255,.9)';
+      tctx.font='10px monospace';
+      tctx.textAlign='center';
+      const timeSec = playOffset / (timelineMode === 'frames' ? FPS * FRAME_STEP : getPixelsPerSecond());
+      const f = Math.floor((timeSec % 1) * FPS);
+      const s = Math.floor(timeSec) % 60;
+      const m = Math.floor(timeSec / 60);
+      tctx.fillText(`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(f).padStart(2,'0')}`, 0, lineLength/2 + 14);
+    } else {
+      // Strip mode: playhead at center
+      tctx.beginPath();
+      tctx.arc(0,0,22,0,Math.PI*2);
+      tctx.stroke();
+      tctx.shadowBlur=0;
+      tctx.fillStyle='#ff3bff';
+      tctx.beginPath(); tctx.arc(0,0,4,0,Math.PI*2); tctx.fill();
+    }
     tctx.restore();
 
     // FPS counter
